@@ -6,13 +6,19 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 #pragma once
+#include <esp_rmaker_core.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <esp_err.h>
 
 #define DEFAULT_POWER       true
 #define DEFAULT_HUE         180
 #define DEFAULT_SATURATION  100
 #define DEFAULT_BRIGHTNESS  25
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 extern esp_rmaker_device_t *light_device;
 
@@ -22,3 +28,7 @@ esp_err_t app_light_set_power(bool power);
 esp_err_t app_light_set_brightness(uint16_t brightness);
 esp_err_t app_light_set_hue(uint16_t hue);
 esp_err_t app_light_set_saturation(uint16_t saturation);
+
+#ifdef __cplusplus
+}
+#endif

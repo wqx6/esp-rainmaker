@@ -1,0 +1,1 @@
+../../../managed_components/espressif__esp_matter/connectedhomeip/connectedhomeip/src/platform/ESP32/NetworkCommissioningDriver.h
