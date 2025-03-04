@@ -23,13 +23,24 @@
 #include <esp_rmaker_console.h>
 #include <esp_rmaker_scenes.h>
 
+#include <esp_matter_core.h>
+#include <esp_matter.h>
+#include <esp_matter_providers.h>
+#include <dynamic_commissionable_data_provider.h>
+#include <matter_commissioning_window_management.h>
+#include <app-common/zap-generated/ids/Clusters.h>
+
 #include <app_wifi.h>
 #include <app_insights.h>
 #include <app_thread_config.h>
 
+using namespace esp_matter;
+using namespace esp_matter::endpoint;
+
 static const char *TAG = "app_main";
 
 esp_rmaker_device_t *thread_br_device;
+static dynamic_commissionable_data_provider g_dynamic_passcode_provider;
 
 #ifdef CONFIG_AUTO_UPDATE_RCP
 static esp_err_t init_spiffs()
@@ -46,7 +57,31 @@ static esp_err_t init_spiffs()
 }
 #endif // CONFIG_AUTO_UPDATE_RCP
 
-void app_main()
+static void matter_event_cb(const ChipDeviceEvent *event, intptr_t arg)
+{
+    if (event->Type == chip::DeviceLayer::DeviceEventType::kCommissioningWindowOpened) {
+        auto *commissionable_data_provider = chip::DeviceLayer::GetCommissionableDataProvider();
+        uint32_t pincode;
+        uint16_t discriminator = 0, vendor_id = 0, product_id = 0;
+        if (commissionable_data_provider) {
+            VerifyOrReturn(commissionable_data_provider->GetSetupPasscode(pincode) == CHIP_NO_ERROR);
+            VerifyOrReturn(commissionable_data_provider->GetSetupDiscriminator(discriminator) == CHIP_NO_ERROR);
+        }
+        auto *device_instance_info_provider = chip::DeviceLayer::GetDeviceInstanceInfoProvider();
+        if (device_instance_info_provider) {
+            VerifyOrReturn(device_instance_info_provider->GetVendorId(vendor_id) == CHIP_NO_ERROR);
+            VerifyOrReturn(device_instance_info_provider->GetProductId(product_id) == CHIP_NO_ERROR);
+        }
+        char setup_pin_str[9];
+        sprintf(setup_pin_str, "%08ld", pincode);
+        matter_commissioning_window_parameters_update(setup_pin_str, discriminator, vendor_id, product_id);
+        matter_commissioning_window_status_update(true);
+    } else if (event->Type == chip::DeviceLayer::DeviceEventType::kCommissioningWindowClosed) {
+        matter_commissioning_window_status_update(false);
+    }
+}
+
+extern "C" void app_main()
 {
     /* Initialize NVS. */
     esp_err_t err = nvs_flash_init();
@@ -81,9 +116,9 @@ void app_main()
     esp_rmaker_node_add_device(node, thread_br_device);
 
     esp_openthread_platform_config_t thread_cfg = {
+        .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
         .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
         .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
-        .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG()
     };
 #ifdef CONFIG_AUTO_UPDATE_RCP
     esp_rcp_update_config_t rcp_update_cfg = ESP_OPENTHREAD_RCP_UPDATE_CONFIG();
@@ -110,10 +145,43 @@ void app_main()
     /* Enable Insights. Requires CONFIG_ESP_INSIGHTS_ENABLED=y */
     app_insights_enable();
 
+    /* Create Matter data model */
+    node::config_t node_config;
+
+    // node handle can be used to add/modify other endpoints.
+    node_t *matter_node = node::create(&node_config, nullptr, nullptr);
+    if (!matter_node) {
+        ESP_LOGE(TAG, "Failed to create Matter node");
+        return;
+    }
+
+    // Add Generic Switch endpoint
+    generic_switch::config_t switch_config;
+    endpoint_t *endpoint = generic_switch::create(matter_node, &switch_config, ENDPOINT_FLAG_NONE, NULL);
+    if (!endpoint) {
+        ESP_LOGE(TAG, "Failed to create Matter endpoint");
+        return;
+    }
+
+    /* Add additional features to the node */
+    cluster_t *cluster = cluster::get(endpoint, chip::app::Clusters::Switch::Id);
+
+    cluster::switch_cluster::feature::momentary_switch::add(cluster);
+    cluster::switch_cluster::feature::action_switch::add(cluster);
+    cluster::switch_cluster::feature::momentary_switch_multi_press::config_t msm;
+    msm.multi_press_max = 5;
+    cluster::switch_cluster::feature::momentary_switch_multi_press::add(cluster, &msm);
+
+    matter_commissioning_window_management_enable();
 
     /* Start the ESP RainMaker Agent */
     esp_rmaker_start();
 
+    esp_matter::set_custom_commissionable_data_provider(&g_dynamic_passcode_provider);
+    err = esp_matter::start(matter_event_cb);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start Matter, err:%d", err);
+    }
     /* Start the Wi-Fi.
      * If the node is provisioned, it will start connection attempts,
      * else, it will start Wi-Fi provisioning. The function will return

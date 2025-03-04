@@ -27,16 +27,29 @@ Press and hold the BOOT button for more than 3 seconds to reset the board to fac
 
 ## Matter Commissioning
 
-After RainMaker Provisioning, You can open the Matter commissioning window by writing the WindowOpen to true. You can write it with `esp-rainmaker-cli`.
+After RainMaker provisioning, you can open the Matter commissioning window by writing the WindowOpen to true with [esp-rainmaker-cli](https://pypi.org/project/esp-rainmaker-cli/).
+
+- Login with the same account that the phone APP uses
 
 ```
 esp-rainmaker-cli login
+```
+
+- Write the WindowOpen to true
+
+```
 esp-rainmaker-cli setparams --data '{"MatterCWM":{"WindowOpen": true}}' <rainmaker-node-id>
 ```
 
-After opening the commissioning window, you can get the SetupPIN, Discriminator, VendorID, and ProductID, which can be used to generate QRCode/ManaulCode for Matter commissioing. For example, you can use chip-tool for generating QRCode.
+After opening the commissioning window, you can get the SetupPIN, Discriminator, VendorID, and ProductID, which can be used to generate QRCode/ManaulCode for Matter commissioing.
 
 ```
-./chip-tool payload generate-qrcode --discriminator 3840 --setup-pin-code 14926893 --vendor-id 0xFFF1 --product-id 0x8001
+esp-rainmaker-cli getparams <<rainmaker-node-id>>
+```
+
+Matter provides APIs to generate QRcode with the SetupPIN, Discriminator, VendorID, and ProductID. Here we use chip-tool to generate the QRCode
+
+```
+./chip-tool payload generate-qrcode --discriminator <discriminator> --setup-pin-code <setup-pin> --vendor-id <vendor-id> --product-id <product-id>
 
 ```
