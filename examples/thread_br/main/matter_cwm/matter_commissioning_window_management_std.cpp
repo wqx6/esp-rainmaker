@@ -1,34 +1,20 @@
 #include "matter_commissioning_window_management_std.h"
 #include "esp_rmaker_core.h"
 
-static esp_rmaker_param_t *matter_setup_pin_param_create(const char *param_name)
+static esp_rmaker_param_t *matter_qrcode_param_create(const char *param_name)
 {
-    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_SETUP_PIN,
+    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_QRCODE,
                                                         esp_rmaker_str(""), PROP_FLAG_READ);
     return param;
 }
 
-static esp_rmaker_param_t *matter_discriminator_param_create(const char *param_name)
+static esp_rmaker_param_t *matter_manualcode_param_create(const char *param_name)
 {
-    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_DISCRIMINATOR,
-                                                        esp_rmaker_int(0), PROP_FLAG_READ);
+    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_MANUALCODE,
+                                                        esp_rmaker_str(""), PROP_FLAG_READ);
     return param;
 }
 
-static esp_rmaker_param_t *matter_vendor_id_param_create(const char *param_name)
-{
-    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_VENDOR_ID,
-                                                        esp_rmaker_int(0), PROP_FLAG_READ);
-    return param;
-}
-
-static esp_rmaker_param_t *matter_product_id_param_create(const char *param_name)
-{
-    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_PRODUCT_ID,
-                                                        esp_rmaker_int(0), PROP_FLAG_READ);
-    return param;
-
-}
 static esp_rmaker_param_t *matter_commissioning_window_open_param_create(const char *param_name)
 {
     esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_COMMISSIONING_WINDOW_OPEN,
@@ -44,10 +30,8 @@ esp_rmaker_param_t *matter_commissioning_window_management_service_create(
                                                              priv_data);
     if (service) {
         esp_rmaker_device_add_cb(service, write_cb, read_cb);
-        esp_rmaker_device_add_param(service, matter_setup_pin_param_create(ESP_RMAKER_DEF_MATTER_SETUP_PIN_NAME));
-        esp_rmaker_device_add_param(service, matter_discriminator_param_create(ESP_RMAKER_DEF_MATTER_DISCRIMINATOR_NAME));
-        esp_rmaker_device_add_param(service, matter_vendor_id_param_create(ESP_RMAKER_DEF_MATTER_VENDOR_ID_NAME));
-        esp_rmaker_device_add_param(service, matter_product_id_param_create(ESP_RMAKER_DEF_MATTER_PRODUCT_ID_NAME));
+        esp_rmaker_device_add_param(service, matter_qrcode_param_create(ESP_RMAKER_DEF_MATTER_QRCODE_NAME));
+        esp_rmaker_device_add_param(service, matter_manualcode_param_create(ESP_RMAKER_DEF_MATTER_MANUALCODE_NAME));
         esp_rmaker_device_add_param(
             service, matter_commissioning_window_open_param_create(ESP_RMAKER_DEF_MATTER_COMMISSIONING_WINDOW_OPEN_NAME));
     }

@@ -60,21 +60,7 @@ static esp_err_t init_spiffs()
 static void matter_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 {
     if (event->Type == chip::DeviceLayer::DeviceEventType::kCommissioningWindowOpened) {
-        auto *commissionable_data_provider = chip::DeviceLayer::GetCommissionableDataProvider();
-        uint32_t pincode;
-        uint16_t discriminator = 0, vendor_id = 0, product_id = 0;
-        if (commissionable_data_provider) {
-            VerifyOrReturn(commissionable_data_provider->GetSetupPasscode(pincode) == CHIP_NO_ERROR);
-            VerifyOrReturn(commissionable_data_provider->GetSetupDiscriminator(discriminator) == CHIP_NO_ERROR);
-        }
-        auto *device_instance_info_provider = chip::DeviceLayer::GetDeviceInstanceInfoProvider();
-        if (device_instance_info_provider) {
-            VerifyOrReturn(device_instance_info_provider->GetVendorId(vendor_id) == CHIP_NO_ERROR);
-            VerifyOrReturn(device_instance_info_provider->GetProductId(product_id) == CHIP_NO_ERROR);
-        }
-        char setup_pin_str[9];
-        sprintf(setup_pin_str, "%08ld", pincode);
-        matter_commissioning_window_parameters_update(setup_pin_str, discriminator, vendor_id, product_id);
+        matter_commissioning_window_parameters_update();
         matter_commissioning_window_status_update(true);
     } else if (event->Type == chip::DeviceLayer::DeviceEventType::kCommissioningWindowClosed) {
         matter_commissioning_window_status_update(false);

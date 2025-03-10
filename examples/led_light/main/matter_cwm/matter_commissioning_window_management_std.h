@@ -7,14 +7,10 @@
 #define ESP_RMAKER_SERVICE_MATTER_COMMISSIONING_WINDOW_MANAGEMENT "esp.service.matter-cwm"
 
 // Matter Commissioning Window Management parameters
-#define ESP_RMAKER_DEF_MATTER_SETUP_PIN_NAME            "SetupPIN"
-#define ESP_RMAKER_PARAM_MATTER_SETUP_PIN               "esp.param.setup-pin"
-#define ESP_RMAKER_DEF_MATTER_DISCRIMINATOR_NAME        "Discriminator"
-#define ESP_RMAKER_PARAM_MATTER_DISCRIMINATOR           "esp.param.discriminator"
-#define ESP_RMAKER_DEF_MATTER_VENDOR_ID_NAME            "VendorID"
-#define ESP_RMAKER_PARAM_MATTER_VENDOR_ID               "esp.param.vendor-id"
-#define ESP_RMAKER_DEF_MATTER_PRODUCT_ID_NAME           "ProductID"
-#define ESP_RMAKER_PARAM_MATTER_PRODUCT_ID              "esp.param.product-id"
+#define ESP_RMAKER_DEF_MATTER_QRCODE_NAME            "QRCode"
+#define ESP_RMAKER_PARAM_MATTER_QRCODE               "esp.param.matter-qrcode"
+#define ESP_RMAKER_DEF_MATTER_MANUALCODE_NAME        "ManualCode"
+#define ESP_RMAKER_PARAM_MATTER_MANUALCODE           "esp.param.matter-manualcode"
 #define ESP_RMAKER_DEF_MATTER_COMMISSIONING_WINDOW_OPEN_NAME     "WindowOpen"
 #define ESP_RMAKER_PARAM_MATTER_COMMISSIONING_WINDOW_OPEN        "esp.param.window-open"
 
