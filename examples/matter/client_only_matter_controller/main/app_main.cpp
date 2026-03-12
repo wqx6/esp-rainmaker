@@ -7,6 +7,8 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 
+#include "esp_matter_core.h"
+#include "portmacro.h"
 #include <string.h>
 #include <inttypes.h>
 #include <freertos/FreeRTOS.h>
@@ -29,6 +31,7 @@
 #include <app_wifi.h>
 #include <app_insights.h>
 #include <app_matter_device_manager.h>
+#include <matter_attr_report.h>
 
 #include <matter_controller_std.h>
 #include <app_matter_controller.h>
@@ -71,7 +74,7 @@ extern "C" void app_main()
 
     /* Initialize Wi-Fi. Note that, this should be called before esp_rmaker_node_init()
      */
-    app_wifi_init();
+    app_network_init();
 
     /* Initialize the ESP RainMaker Agent.
      * Note that this should be called after app_wifi_init() but before app_wifi_start()
@@ -132,14 +135,14 @@ extern "C" void app_main()
     /* Start the ESP RainMaker Agent */
     esp_rmaker_start();
 
-    err = app_wifi_set_custom_mfg_data(MGF_DATA_DEVICE_TYPE_MATTER_CONTROLLER,
+    err = app_network_set_custom_mfg_data(MGF_DATA_DEVICE_TYPE_MATTER_CONTROLLER,
                                        MFG_DATA_DEVICE_SUBTYPE_MATTER_CONTROLLER);
     /* Start the Wi-Fi.
      * If the node is provisioned, it will start connection attempts,
      * else, it will start Wi-Fi provisioning. The function will return
      * after a connection has been successfully established
      */
-    err = app_wifi_start(POP_TYPE_RANDOM);
+    err = app_network_start(POP_TYPE_RANDOM);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Could not start Wifi. Aborting!!!");
         vTaskDelay(5000/portTICK_PERIOD_MS);
@@ -148,13 +151,16 @@ extern "C" void app_main()
 
     // Start matter
     esp_matter::start(NULL);
-    esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
-    esp_matter::controller::matter_controller_client::get_instance().init(0, 0, 5580);
+    {
+        esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+        esp_matter::controller::matter_controller_client::get_instance().init(0, 0, 5580);
+    }
     esp_matter::console::diagnostics_register_commands();
     esp_matter::console::init();
     esp_matter::console::controller_register_commands();
     esp_matter::console::ctl_dev_mgr_register_commands();
-    init_device_manager(NULL);
+    matter_attr_report_init(matter_controller_get_matter_devices_param());
+    init_device_manager(matter_attr_report_on_device_list_updated);
     // Update matter controller handler after join to Wi-Fi network
     matter_controller_handle_update();
 }

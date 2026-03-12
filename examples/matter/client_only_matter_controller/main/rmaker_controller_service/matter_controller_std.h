@@ -30,6 +30,8 @@
 #define ESP_RMAKER_PARAM_MATTER_CTL_CMD         "esp.param.matter-ctl-cmd"
 #define ESP_RMAKER_DEF_MATTER_CTL_STATUS_NAME   "MTCtlStatus"
 #define ESP_RMAKER_PARAM_MATTER_CTL_STATUS      "esp.param.matter-ctl-status"
+#define ESP_RMAKER_DEF_MATTER_DEVICES_NAME   "Matter-Devices"
+#define ESP_RMAKER_PARAM_MATTER_DEVICES      "esp.param.matter-devices"
 
 esp_rmaker_param_t *matter_controller_base_url_param_create(const char *param_name);
 esp_rmaker_param_t *matter_controller_user_token_param_create(const char *param_name);
@@ -37,6 +39,7 @@ esp_rmaker_param_t *matter_controller_rmaker_group_id_param_create(const char *p
 esp_rmaker_param_t *matter_controller_matter_node_id_param_create(const char *param_name);
 esp_rmaker_param_t *matter_controller_matter_ctl_cmd_param_create(const char *param_name);
 esp_rmaker_param_t *matter_controller_matter_ctl_status_param_create(const char *param_name);
+esp_rmaker_param_t *matter_controller_matter_devices_param_create(const char *param_name);
 
 esp_rmaker_device_t *matter_controller_service_create(const char *serv_name, esp_rmaker_device_write_cb_t write_cb,
                                                       esp_rmaker_device_read_cb_t read_cb, void *priv_data);

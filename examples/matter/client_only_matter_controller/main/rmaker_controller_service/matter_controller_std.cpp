@@ -51,6 +51,13 @@ esp_rmaker_param_t *matter_controller_matter_ctl_status_param_create(const char 
     return param;
 }
 
+esp_rmaker_param_t *matter_controller_matter_devices_param_create(const char *param_name)
+{
+    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_DEVICES,
+            esp_rmaker_obj("{}"), PROP_FLAG_READ);
+    return param;
+}
+
 esp_rmaker_device_t *matter_controller_service_create(const char *serv_name, esp_rmaker_device_write_cb_t write_cb,
                                                       esp_rmaker_device_read_cb_t read_cb, void *priv_data)
 {
@@ -67,6 +74,8 @@ esp_rmaker_device_t *matter_controller_service_create(const char *serv_name, esp
                     matter_controller_matter_ctl_cmd_param_create(ESP_RMAKER_DEF_MATTER_CTL_CMD_NAME));
         esp_rmaker_device_add_param(service,
                     matter_controller_matter_ctl_status_param_create(ESP_RMAKER_DEF_MATTER_CTL_STATUS_NAME));
+        esp_rmaker_device_add_param(service,
+                    matter_controller_matter_devices_param_create(ESP_RMAKER_DEF_MATTER_DEVICES_NAME));
     }
     return service;
 }

@@ -24,6 +24,7 @@
 #include <app_matter_controller.h>
 #include <app_matter_controller_creds_issuer.h>
 #include <matter_controller_std.h>
+#include <matter_controller_cmd_resp.h>
 
 #define TAG "MatterController"
 #define MATTER_CTL_CMD_UPDATE_NOC 1
@@ -253,6 +254,13 @@ esp_err_t matter_controller_handle_update()
     status.matter_fabric_id_set = handle->matter_fabric_id != 0;
     status.matter_noc_installed = handle->matter_noc_installed;
     matter_controller_report_status(status);
+    if (status.base_url_set && status.user_token_set && status.access_token_set && status.rmaker_group_id_set &&
+        status.matter_fabric_id_set && status.matter_node_id_set && status.matter_noc_installed) {
+        ESP_LOGI(TAG, "All required parameters are set, updating device list");
+        if (ESP_OK != s_matter_controller_callback(handle, MATTER_CONTROLLER_CALLBACK_TYPE_UPDATE_DEVICE)){
+            ESP_LOGE(TAG, "Failed on updating device list");
+        }
+    }
     return ESP_OK;
 }
 
@@ -329,7 +337,7 @@ esp_err_t matter_controller_enable(uint16_t matter_vendor_id, matter_controller_
     }
     s_matter_controller_handle->matter_vendor_id = matter_vendor_id;
     s_matter_controller_callback = callback;
-    s_matter_controller_handle->service = matter_controller_service_create("MatterCTL", write_cb, NULL, NULL);
+    s_matter_controller_handle->service = matter_controller_service_create("Matter-Controller", write_cb, NULL, NULL);
     if (!s_matter_controller_handle->service) {
         ESP_LOGE(TAG, "Failed to create MatterController Service");
         free(s_matter_controller_handle);
@@ -346,7 +354,7 @@ esp_err_t matter_controller_enable(uint16_t matter_vendor_id, matter_controller_
 
     static example_op_creds_issuer s_matter_controller_creds_issuer(s_matter_controller_handle);
     esp_matter::controller::set_custom_credentials_issuer(&s_matter_controller_creds_issuer);
-    return ESP_OK;
+    return matter_controller_cmd_resp_enable();
 }
 
 esp_err_t matter_controller_report_status(matter_controller_status_t status)
@@ -357,4 +365,12 @@ esp_err_t matter_controller_report_status(matter_controller_status_t status)
     esp_rmaker_param_t *param =
         esp_rmaker_device_get_param_by_type(s_matter_controller_handle->service, ESP_RMAKER_PARAM_MATTER_CTL_STATUS);
     return esp_rmaker_param_update_and_report(param, val);
+}
+
+esp_rmaker_param_t *matter_controller_get_matter_devices_param(void)
+{
+    if (!s_matter_controller_handle || !s_matter_controller_handle->service) {
+        return NULL;
+    }
+    return esp_rmaker_device_get_param_by_type(s_matter_controller_handle->service, ESP_RMAKER_PARAM_MATTER_DEVICES);
 }

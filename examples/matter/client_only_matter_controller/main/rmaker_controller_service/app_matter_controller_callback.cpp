@@ -84,8 +84,11 @@ static esp_err_t app_matter_controller_setup_controller(matter_controller_handle
         ESP_LOGI(TAG, "NOC chain has been installed, setup controller with an empty IPK");
         ipk_span.reduce_size(0);
     }
-    esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
-    esp_err_t err = esp_matter::controller::matter_controller_client::get_instance().setup_controller(ipk_span);
+    esp_err_t err = ESP_OK;
+    {
+        esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+        err = esp_matter::controller::matter_controller_client::get_instance().setup_controller(ipk_span);
+    }
     controller_setup = true;
     return err;
 }

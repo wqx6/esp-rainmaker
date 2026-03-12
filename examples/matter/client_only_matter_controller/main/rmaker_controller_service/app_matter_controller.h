@@ -54,3 +54,6 @@ esp_err_t matter_controller_handle_update();
 esp_err_t matter_controller_enable(uint16_t matter_vendor_id, matter_controller_callback_t callback);
 
 esp_err_t matter_controller_report_status(matter_controller_status_t status);
+
+/** RainMaker param holding aggregated Matter attribute JSON (`esp.param.matter-attributes`), or NULL if disabled. */
+esp_rmaker_param_t *matter_controller_get_matter_devices_param(void);
