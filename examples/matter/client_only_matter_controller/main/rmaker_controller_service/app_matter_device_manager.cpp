@@ -17,6 +17,7 @@
 #include <controller_rest_apis.h>
 
 #include <app_matter_device_manager.h>
+#include <matter_command_list_sync.h>
 #include <matter_device.h>
 
 #define TAG "mt_dev_mgr"
@@ -93,6 +94,10 @@ static esp_err_t update_device_list_handler(void *ctx)
     esp_err_t err = fetch_matter_device_list(handle->base_url, handle->access_token, handle->rmaker_group_id, &tmp);
     if (err != ESP_OK) {
         return err;
+    }
+    err = matter_command_list_sync_for_device_list(handle->base_url, handle->access_token, tmp);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "matter_command_list_sync_for_device_list: %s", esp_err_to_name(err));
     }
     xSemaphoreTake(s_mt_ctl_dev_mgr_mutex, portMAX_DELAY);
     if (s_mt_ctl_dev_list) {
@@ -181,7 +186,7 @@ esp_err_t init_device_manager(device_list_update_callback_t dev_list_update_cb)
         vQueueDelete(s_mt_ctl_dev_mgr_task_queue);
         return ESP_ERR_NO_MEM;
     }
-    if (xTaskCreate(device_mgr_task, "device_mgr", 4096, NULL, 5, &s_mt_ctl_dev_mgr_task) != pdTRUE) {
+    if (xTaskCreate(device_mgr_task, "device_mgr", 5120, NULL, 5, &s_mt_ctl_dev_mgr_task) != pdTRUE) {
         ESP_LOGE(TAG, "Failed to create device mgr task");
         vQueueDelete(s_mt_ctl_dev_mgr_task_queue);
         vSemaphoreDelete(s_mt_ctl_dev_mgr_mutex);

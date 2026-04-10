@@ -6,4 +6,5 @@ idf_component_register(SRCS "./app_main.cpp"
                             "./rmaker_controller_service/matter_attr_report.cpp"
                             "./rmaker_controller_service/matter_controller_std.cpp"
                             "./rmaker_controller_service/matter_controller_cmd_resp.cpp"
+                            "./rmaker_controller_service/matter_command_list_sync.cpp"
                        INCLUDE_DIRS "." "rmaker_controller_service" "op_creds_issuer")

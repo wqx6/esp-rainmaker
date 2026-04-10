@@ -55,7 +55,6 @@ const int INVOKE_CMD_HANDLED_EVENT = BIT0;
 const int WRITE_ATTR_HANDLED_EVENT = BIT1;
 const int READ_HANDLED_EVENT = BIT2;
 EventGroupHandle_t s_matter_controller_event_group;
-bool s_read_failed = false;
 bool s_read_results_array_open = false;
 
 static void close_read_results_array(void)
@@ -392,7 +391,7 @@ static void read_attribute_data_cb(uint64_t remote_node_id,
     json_gen_obj_set_string(&s_resp_jstr, "endpoint_id", endpoint_id_str);
     json_gen_obj_set_string(&s_resp_jstr, "cluster_id", cluster_id_str);
     json_gen_obj_set_string(&s_resp_jstr, "attribute_id", attribute_id_str);
-    if (status.ToChipError() != CHIP_NO_ERROR) {
+    if (status.IsFailure()) {
         json_gen_obj_set_string(&s_resp_jstr, "error", status.ToChipError().AsString());
     } else if (data) {
         decode_tlv_value_to_jstrgen(data, "attribute_value", &s_resp_jstr);
@@ -416,7 +415,7 @@ static void read_event_data_cb(uint64_t remote_node_id,
     json_gen_obj_set_string(&s_resp_jstr, "endpoint_id", endpoint_id_str);
     json_gen_obj_set_string(&s_resp_jstr, "cluster_id", cluster_id_str);
     json_gen_obj_set_string(&s_resp_jstr, "event_id", event_id_str);
-    if (status && status->ToChipError() != CHIP_NO_ERROR) {
+    if (status && status->IsFailure()) {
         json_gen_obj_set_string(&s_resp_jstr, "error", status->ToChipError().AsString());
     } else if (data) {
         decode_tlv_value_to_jstrgen(data, "event_data", &s_resp_jstr);
@@ -432,9 +431,6 @@ static void read_attribute_done_cb(uint64_t remote_node_id,
     (void)attr_path;
     (void)event_path;
     close_read_results_array();
-    if (!s_read_failed) {
-        json_gen_obj_set_string(&s_resp_jstr, "status", "success");
-    }
     xEventGroupSetBits(s_matter_controller_event_group, READ_HANDLED_EVENT);
 }
 
@@ -442,7 +438,6 @@ static void read_connect_failure_fcn(void *context, const chip::ScopedNodeId &pe
 {
     (void)peer_id;
     (void)error;
-    s_read_failed = true;
     close_read_results_array();
     json_gen_obj_set_string(&s_resp_jstr, "status", "failure");
     json_gen_obj_set_string(&s_resp_jstr, "reason", "device_unreachable");
@@ -452,7 +447,6 @@ static void read_connect_failure_fcn(void *context, const chip::ScopedNodeId &pe
 static void read_error_fcn(uint64_t node_id, CHIP_ERROR error)
 {
     (void)node_id;
-    s_read_failed = true;
     close_read_results_array();
     json_gen_obj_set_string(&s_resp_jstr, "status", "failure");
     json_gen_obj_set_string(&s_resp_jstr, "reason", error.AsString());
@@ -830,11 +824,9 @@ esp_err_t esp_rmaker_matter_controller_read_handler(const void *in_data, size_t 
         json_gen_str_start(&s_resp_jstr, s_cmd_resp_buffer, MAX_CMD_RESP_BUFFER_SIZE, NULL, NULL);
         json_gen_start_object(&s_resp_jstr);
         json_gen_obj_set_string(&s_resp_jstr, "matter_node_id", node_id_str);
-        s_read_failed = false;
         json_gen_push_array(&s_resp_jstr, "read_results");
         s_read_results_array_open = true;
         if (read_attr_or_event_command(node_id, std::move(attr_paths), std::move(event_paths)) != ESP_OK) {
-            s_read_failed = true;
             close_read_results_array();
             json_gen_obj_set_string(&s_resp_jstr, "status", "failure");
             json_gen_obj_set_string(&s_resp_jstr, "reason", "read_attr_or_event_command failed");

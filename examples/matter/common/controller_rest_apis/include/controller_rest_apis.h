@@ -151,6 +151,20 @@ esp_err_t create_matter_controller(const char *endpoint_url, const char *access_
 esp_err_t fetch_matter_device_list(const char *endpoint_url, const char *access_token, const char *rainmaker_group_id,
                                    matter_device_t **matter_dev_list);
 
+/**
+ * Update RainMaker node metadata (PUT user/nodes). Body must be a full JSON object, e.g.
+ * `{"metadata":{"Matter":{...}}}`.
+ *
+ * @param[in] endpoint_url Base API URL
+ * @param[in] access_token Authorization bearer value
+ * @param[in] rainmaker_node_id Target node id
+ * @param[in] body_json JSON payload (null-terminated)
+ *
+ * @return ESP_OK when HTTP 200 and success status in response body (if present)
+ */
+esp_err_t update_rainmaker_node_metadata(const char *endpoint_url, const char *access_token,
+                                         const char *rainmaker_node_id, const char *body_json);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

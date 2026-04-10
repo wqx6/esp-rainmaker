@@ -6,81 +6,211 @@ Follow the ESP RainMaker Documentation [Get Started](https://rainmaker.espressif
 
 ## What to expect in this example?
 
-- This example uses [wifi_provision](https://github.com/espressif/esp-idf/tree/master/components/wifi_provisioning) to provision a Matter Controller into a Wi-Fi network.
+- This example uses [network_provision](https://github.com/espressif/idf-extra-components/tree/master/network_provisioning) to provision Matter Controller into Wi-Fi network.
 
-- Use [RainMaker CLI](../../../cli/) to setup the Matter Controller.
+- After provisioning, the [Phone APP](https://github.com/espressif/esp-rainmaker/blob/master/README.md#phone-apps) can setup the controller by the [Matter Controller service](./main/rmaker_controller_service/SPEC.md).
 
-- Use [device console](https://docs.espressif.com/projects/esp-matter/en/latest/esp32/developing.html#matter-controller) to send Matter commands to other Matter End-Devices.
+- Use [Command Response](https://docs.rainmaker.espressif.com/docs/dev/firmware/fw_usage_guides/command-response-usage) to send Matter commands to Matter End-Devices remotely.
+
+- Get Matter end-devices attributes' value by the `Matter-devices` parameter in controller service.
 
 ## Steps to use this example
 
-- Use [RainMaker Phone App](https://github.com/espressif/esp-rainmaker/blob/master/README.md#phone-apps) to provision the Matter Controller example to RainMaker home as a basic RainMaker device.
+- Use RainMaker Phone App to provision the Matter Controller example to RainMaker home as a basic RainMaker device.
 
-- Login your RainMaker account to get the refres-token and access-token:
+- After provisioning, click the button to setup the controller in the Phone APP. You need to select which group (Matter Fabric) that the controller will join.
 
-```
-curl -X 'POST' \
-  '<base-url>/v1/login2'\
-  -H 'accept: application/json'\
-  -H 'Content-Type: application/json'\
-  -d '{ "user_name": "<user-name>", "password": "<password>" }'
-{"status":"success","description":"Login successful","idtoken": <id-token>, "accesstoken": "<access-token>", "refreshtoken": "<refres-token>"}
-```
+- After the controller is setup the controller will fetch the Matter device list and start to report the attributes' value of each device.
 
-**Note**: The default `base-url` should be "https://api.rainmaker.espressif.com" if using public server.
+- You can use the esp-rainmaker-cli to send the Matter command requests remotely.
 
-- Get the RainMaker Group(Matter Fabric) which you want the controller to join in:
+  1. Invoke Command:
+  ```
+  $ esp-rainmaker-cli create_cmd_request 99Skm2t5sGMui2fLATZ4i2 4352 '{"objects": [{"matter_node_id": "0x676FAF22D3151705", "matter_endpoint_id": "0x1"}], "request_payload": {"cluster_id": "0x6", "command_id": "0x02", "command_fields": {}}}' --timeout 60
+  Request Id: A3VPPxj9D8BYGXLgkokKQW
+  Responses: [{'node_ids': ['99Skm2t5sGMui2fLATZ4i2'], 'response': {'status': 'success', 'description': 'in_progress'}}]
 
-```
-curl -X 'GET' \
-  '<base-url>/v1/user/node_group?node_list=false&sub_groups=false&node_details=true&is_matter=true&fabric_details=false&num_records=25' \
-  -H 'accept: application/json' \
-  -H 'Authorization: <access-token>'
-{"groups":[{"group_id":"<rmaker-group-id>","group_name":"<group-name>","fabric_id":"<matter-fabric-id>","is_matter":true,"primary":true,"total":0}, ...],"total":<group-num>}
-```
+  $ esp-rainmaker-cli get_cmd_requests A3VPPxj9D8BYGXLgkokKQW
+  Requests: [{'node_id': '99Skm2t5sGMui2fLATZ4i2', 'request_id': 'A3VPPxj9D8BYGXLgkokKQW', 'request_timestamp': 1776065900, 'response_timestamp': 1776065902, 'response_data': {'responses': [{'matter_endpoint_id': '0x1', 'matter_node_id': '0x676FAF22D3151705', 'status': 'success'}]}, 'request_data': {'objects': [{'matter_endpoint_id': '0x1', 'matter_node_id': '0x676FAF22D3151705'}], 'request_payload': {'cluster_id': '0x6', 'command_fields': {}, 'command_id': '0x02'}}, 'status': 'success', 'device_status': 0, 'expiration_timestamp': 1776065960, 'cmd': 4352}]
+  Total: 1
+  ```
 
-- Get the Controller's RainMaker Node ID from your phone APP or RainMaker CLI:
+  2. Write Attribue:
+  ```
+  $ esp-rainmaker-cli create_cmd_request 99Skm2t5sGMui2fLATZ4i2 4353 '{"objects": [{"matter_node_id": "0x676FAF22D3151705", "matter_endpoint_id": "0x1"}], "request_payload": {"cluster_id": "0x06", "attribute_id": "0x4001", "attribute_value": {"0:U16": 1}}}' --timeout 60
+  Request Id: TB6JMRDjrgKMg8vEPwNxBQ
+  Responses: [{'node_ids': ['99Skm2t5sGMui2fLATZ4i2'], 'response': {'status': 'success', 'description': 'in_progress'}}]
 
-```
-esp-rainmaker-cli getnodes
-<controller-rmaker-node-id>
-<other-device-rmaker-node-id>
-...
-```
+  $ esp-rainmaker-cli get_cmd_requests TB6JMRDjrgKMg8vEPwNxBQ
+  Requests: [{'node_id': '99Skm2t5sGMui2fLATZ4i2', 'request_id': 'TB6JMRDjrgKMg8vEPwNxBQ', 'request_timestamp': 1776066034, 'response_timestamp': 1776066035, 'response_data': {'responses': [{'matter_endpoint_id': '0x1', 'matter_node_id': '0x676FAF22D3151705', 'status': 'success'}]}, 'request_data': {'objects': [{'matter_endpoint_id': '0x1', 'matter_node_id': '0x676FAF22D3151705'}], 'request_payload': {'attribute_id': '0x4001', 'attribute_value': {'0:U16': 1}, 'cluster_id': '0x06'}}, 'status': 'success', 'device_status': 0, 'expiration_timestamp': 1776066094, 'cmd': 4353}]
+  Total: 1
+  ```
 
-- Send `setparams` command with RainMaker CLI:
+  3. Read Attribute:
+  ```
+  $ esp-rainmaker-cli create_cmd_request 99Skm2t5sGMui2fLATZ4i2 4354 '{"matter_node_id": "0x676FAF22D3151705", "attribute_paths": [{"endpoint_id": "0xFFFF", "cluster_id": "0xFFFFFFFF", "attribute_id": "0xFFF9"}]}' --timeout 60
+  Request Id: tWrrGyjqrpyM4dv2ZQVJE
+  Responses: [{'node_ids': ['99Skm2t5sGMui2fLATZ4i2'], 'response': {'status': 'success', 'description': 'in_progress'}}]
 
-```
-esp-rainmaker-cli setparams --data '{"MatterCTL":{"BaseURL": <base-url>, "UserToken": <refresh-token>, "RMakerGroupID": <rmaker-group-id>}}' <controller-rmaker-node-id>
-```
+  $ esp-rainmaker-cli get_cmd_requests tWrrGyjqrpyM4dv2ZQVJE
+  Requests: [{'node_id': '99Skm2t5sGMui2fLATZ4i2', 'request_id': 'tWrrGyjqrpyM4dv2ZQVJE', 'request_timestamp': 1776066126, 'response_timestamp': 1776066128, 'response_data': {'matter_node_id': '0x676FAF22D3151705', 'read_results': [{'attribute_id': '0x0000fff9', 'attribute_value': [], 'cluster_id': '0x0000001d', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [], 'cluster_id': '0x0000001f', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [], 'cluster_id': '0x00000028', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 2, 4], 'cluster_id': '0x00000030', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 2, 4, 6, 8], 'cluster_id': '0x00000031', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 1], 'cluster_id': '0x00000033', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 2], 'cluster_id': '0x0000003c', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 2, 4, 6, 7, 9, 10, 11, 12, 13], 'cluster_id': '0x0000003e', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 1, 3, 4], 'cluster_id': '0x0000003f', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [], 'cluster_id': '0x00000036', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [], 'cluster_id': '0x00000035', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0], 'cluster_id': '0x0000002a', 'endpoint_id': '0'}, {'attribute_id': '0x0000fff9', 'attribute_value': [], 'cluster_id': '0x0000001d', 'endpoint_id': '1'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 64], 'cluster_id': '0x00000003', 'endpoint_id': '1'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 1, 2, 3, 4, 5], 'cluster_id': '0x00000004', 'endpoint_id': '1'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 64, 65, 66, 1, 2], 'cluster_id': '0x00000006', 'endpoint_id': '1'}, {'attribute_id': '0x0000fff9', 'attribute_value': [0, 1, 2, 3, 4, 5, 6, 7], 'cluster_id': '0x00000008', 'endpoint_id': '1'}, {'attribute_id': '0x0000fff9', 'attribute_value': [10, 75, 76, 7, 8, 9, 71], 'cluster_id': '0x00000300', 'endpoint_id': '1'}, {'attribute_id': '0x0000fff9', 'attribute_value': [64, 0, 1, 2, 3, 4, 5, 6], 'cluster_id': '0x00000062', 'endpoint_id': '1'}], 'status': 'success'}, 'request_data': {'attribute_paths': [{'attribute_id': '0xFFF9', 'cluster_id': '0xFFFFFFFF', 'endpoint_id': '0xFFFF'}], 'matter_node_id': '0x676FAF22D3151705'}, 'status': 'success', 'device_status': 0, 'expiration_timestamp': 1776066186, 'cmd': 4354}]
+  Total: 1
+  ```
 
-
-- Update the device list of the Controller's Fabric with RainMaker CLI:
-
-```
-esp-rainmaker-cli setparams --data '{"MatterCTL":{"MTCtlCMD": 2}}' <controller-rmaker-node-id>
-```
-
-- Get the node list from the controller's device console
+- Get Attribute report of Matter End-Devices:
 
 ```
-> matter esp dev_mgr print
-
-I (929673) MATTER_DEVICE: device 0 : {
-I (929673) MATTER_DEVICE:     rainmaker_node_id: <other-device-rmaker-node-id>,
-I (929673) MATTER_DEVICE:     matter_node_id: <other-device-matter-node-id>,
-I (929683) MATTER_DEVICE:     is_rainmaker_device: false,
-I (929683) MATTER_DEVICE:     is_online: false,
-I (929703) MATTER_DEVICE:     endpoints : [
-I (929703) MATTER_DEVICE:         {
-I (929713) MATTER_DEVICE:            endpoint_id: 1,
-I (929713) MATTER_DEVICE:            device_type_id: 0x10d,
-I (929723) MATTER_DEVICE:            device_name: Matter Accessory,
-I (929723) MATTER_DEVICE:         },
-I (929723) MATTER_DEVICE:     ]
-I (929733) MATTER_DEVICE: }
-...
-Done
+$ esp-rainmaker-cli getparams 99Skm2t5sGMui2fLATZ4i2
+{
+    "MatterCTLR": {
+        "BaseURL": "https://v0iv7y5po7.execute-api.us-east-1.amazonaws.com/dev",
+        "MTCtlCMD": -1,
+        "MTCtlStatus": 127,
+        "Matter-Devices": {
+            "676faf22d3151705": {
+                "endpoints": {
+                    "0x1": {
+                        "clusters": {
+                            "servers": {
+                                "0x3": {
+                                    "attributes": {
+                                        "0x0": 0,
+                                        "0x1": 20
+                                    }
+                                },
+                                "0x300": {
+                                    "attributes": {
+                                        "0x10": 0,
+                                        "0x2": 0,
+                                        "0x3": 24939,
+                                        "0x4": 24701,
+                                        "0x4001": 2,
+                                        "0x400A": 24,
+                                        "0x400B": 1,
+                                        "0x400C": 65279,
+                                        "0x400D": 1,
+                                        "0x7": 250,
+                                        "0x8": 2,
+                                        "0xF": 0
+                                    }
+                                },
+                                "0x4": {
+                                    "attributes": {
+                                        "0x0": 128
+                                    }
+                                },
+                                "0x6": {
+                                    "attributes": {
+                                        "0x0": true,
+                                        "0x4000": true,
+                                        "0x4001": 1,
+                                        "0x4002": 0
+                                    }
+                                },
+                                "0x62": {
+                                    "attributes": {
+                                        "0x1": 16,
+                                        "0x2": [
+                                            {
+                                                "0x0": 0,
+                                                "0x4": 7,
+                                                "0xFE": 1
+                                            },
+                                            {
+                                                "0x0": 0,
+                                                "0x1": 0,
+                                                "0x2": 0,
+                                                "0x3": false,
+                                                "0x4": 7,
+                                                "0xFE": 2
+                                            }
+                                        ]
+                                    }
+                                },
+                                "0x8": {
+                                    "attributes": {
+                                        "0x0": 64,
+                                        "0x1": 0,
+                                        "0x11": 64,
+                                        "0x4000": 64,
+                                        "0xF": 0
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "online": true,
+                "rainmaker_node_id": "3JphZTNLqr3MxpSrkn8dvj"
+            },
+            "7aaa6abef599644f": {
+                "endpoints": {
+                    "0x1": {
+                        "clusters": {
+                            "servers": {
+                                "0x3": {
+                                    "attributes": {
+                                        "0x0": 0,
+                                        "0x1": 20
+                                    }
+                                },
+                                "0x4": {
+                                    "attributes": {
+                                        "0x0": 128
+                                    }
+                                },
+                                "0x6": {
+                                    "attributes": {
+                                        "0x0": false,
+                                        "0x4000": true,
+                                        "0x4001": 0,
+                                        "0x4002": 0
+                                    }
+                                },
+                                "0x62": {
+                                    "attributes": {
+                                        "0x1": 16,
+                                        "0x2": [
+                                            {
+                                                "0x0": 0,
+                                                "0x4": 7,
+                                                "0xFE": 1
+                                            },
+                                            {
+                                                "0x0": 0,
+                                                "0x1": 0,
+                                                "0x2": 0,
+                                                "0x3": false,
+                                                "0x4": 7,
+                                                "0xFE": 2
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "online": true,
+                "rainmaker_node_id": "23qFhjTqShYDxQLrPUFBZX"
+            }
+        },
+        "MatterNodeID": "AFEDFB94E792001B",
+        "RMakerGroupID": "N4kcszpcx8TVwJjmTD7GHY",
+        "UserToken": "XXX"
+    },
+    "MatterController": {
+        "Name": "MatterController"
+    },
+    "Scenes": {
+        "Scenes": []
+    },
+    "Schedule": {
+        "Schedules": []
+    },
+    "Time": {
+        "TZ": "Asia/Shanghai",
+        "TZ-POSIX": "CST-8"
+    }
+}
 ```
-
-- Send [Matter commands](https://docs.espressif.com/projects/esp-matter/en/latest/esp32/developing.html#matter-controller) to other Matter End-Devices with the device console of Matter controller.

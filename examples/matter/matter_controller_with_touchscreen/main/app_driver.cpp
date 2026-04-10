@@ -67,11 +67,7 @@ void on_device_list_update(void)
     }
     int dev_count=0;
     while (ptr) {
-        if (ptr->reachable) {
-            node_id += ptr->node_id;
-        } else {
-            node_id -= ptr->node_id;
-        }
+        node_id += ptr->node_id;
         ptr = ptr->next;
         dev_count++;
     }

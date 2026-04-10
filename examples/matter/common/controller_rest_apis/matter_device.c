@@ -36,7 +36,8 @@ void print_matter_device_list(matter_device_t *dev_list)
         ESP_LOGI(TAG, "    matter_node_id: 0x%llX,", dev_list->node_id);
         if (dev_list->is_metadata_fetched) {
             ESP_LOGI(TAG, "    is_rainmaker_device: %s,", dev_list->is_rainmaker_device ? "true" : "false");
-            ESP_LOGI(TAG, "    is_online: %s,", dev_list->reachable ? "true" : "false");
+            ESP_LOGI(TAG, "    metadata_has_command_lists: %s,",
+                     dev_list->metadata_has_command_lists ? "true" : "false");
             ESP_LOGI(TAG, "    endpoints : [");
             for (size_t i = 0; i < dev_list->endpoint_count; ++i) {
                 ESP_LOGI(TAG, "        {");

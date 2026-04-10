@@ -38,8 +38,9 @@ typedef struct matter_device {
     bool is_metadata_fetched;
     uint8_t endpoint_count;
     endpoint_entry_t endpoints[ESP_MATTER_DEVICE_MAX_ENDPOINT];
-    bool reachable;
     bool is_rainmaker_device;
+    /** True if RainMaker metadata already lists per-cluster command IDs under Matter.endpoints */
+    bool metadata_has_command_lists;
     struct matter_device *next;
 } matter_device_t;
 

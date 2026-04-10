@@ -267,6 +267,7 @@ esp_err_t matter_controller_handle_update()
 static esp_err_t write_cb(const esp_rmaker_device_t *device, const esp_rmaker_param_t *param,
                           const esp_rmaker_param_val_t val, void *priv_data, esp_rmaker_write_ctx_t *ctx)
 {
+    printf("write_cb: %s, %s\n", esp_rmaker_param_get_type(param), ctx->src == ESP_RMAKER_REQ_SRC_INIT ? "INIT" : "REMOTE");
     if (!s_matter_controller_handle) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -337,7 +338,7 @@ esp_err_t matter_controller_enable(uint16_t matter_vendor_id, matter_controller_
     }
     s_matter_controller_handle->matter_vendor_id = matter_vendor_id;
     s_matter_controller_callback = callback;
-    s_matter_controller_handle->service = matter_controller_service_create("Matter-Controller", write_cb, NULL, NULL);
+    s_matter_controller_handle->service = matter_controller_service_create("MatterCTLR", write_cb, NULL, NULL);
     if (!s_matter_controller_handle->service) {
         ESP_LOGE(TAG, "Failed to create MatterController Service");
         free(s_matter_controller_handle);

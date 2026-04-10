@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define TAG "RMAKER_REST"
 #define HTTP_API_VERSION "v1"
@@ -1406,23 +1407,153 @@ cleanup:
   return ret;
 }
 
-static esp_err_t get_node_reachable(jparse_ctx_t *jctx, bool *value) {
-  bool value_got = false;
-  if (json_obj_get_object(jctx, "status") == 0) {
-    if (json_obj_get_object(jctx, "connectivity") == 0) {
-      if (json_obj_get_bool(jctx, "connected", value) == 0) {
-        value_got = true;
-      }
-      json_obj_leave_object(jctx);
-    }
-    json_obj_leave_object(jctx);
+/* jsmn token helpers (aligned with espressif json_parser internals) */
+static json_tok_t *rm_json_skip_elem(json_tok_t *token)
+{
+  json_tok_t *cur = token;
+  int cnt = cur->size;
+  while (cnt--) {
+    cur++;
+    cur = rm_json_skip_elem(cur);
   }
-  return value_got ? ESP_OK : ESP_ERR_NOT_FOUND;
+  return cur;
 }
 
+static bool rm_tok_str_eq(const jparse_ctx_t *jctx, const json_tok_t *tok,
+                          const char *s)
+{
+  if (!jctx || !tok || tok->type != JSMN_STRING || !s) {
+    return false;
+  }
+  size_t slen = strlen(s);
+  int tlen = tok->end - tok->start;
+  if ((int)slen != tlen) {
+    return false;
+  }
+  return strncmp(jctx->js + tok->start, s, (size_t)tlen) == 0;
+}
+
+/** True if cluster object has a "commands" array (any length). */
+static bool rm_cluster_obj_has_commands_array(const jparse_ctx_t *jctx,
+                                              json_tok_t *cluster_obj)
+{
+  if (!cluster_obj || cluster_obj->type != JSMN_OBJECT) {
+    return false;
+  }
+  json_tok_t *tok = cluster_obj;
+  int pairs = cluster_obj->size;
+  while (pairs--) {
+    tok++;
+    json_tok_t *key = tok;
+    tok++;
+    json_tok_t *val = tok;
+    if (key->type == JSMN_STRING && rm_tok_str_eq(jctx, key, "commands") &&
+        val->type == JSMN_ARRAY) {
+      return true;
+    }
+    tok = rm_json_skip_elem(val);
+  }
+  return false;
+}
+
+static bool rm_servers_obj_scan(const jparse_ctx_t *jctx, json_tok_t *servers_obj)
+{
+  if (!servers_obj || servers_obj->type != JSMN_OBJECT) {
+    return false;
+  }
+  json_tok_t *tok = servers_obj;
+  int pairs = servers_obj->size;
+  while (pairs--) {
+    tok++;
+    tok++;
+    json_tok_t *val = tok;
+    if (val->type == JSMN_OBJECT && rm_cluster_obj_has_commands_array(jctx, val)) {
+      return true;
+    }
+    tok = rm_json_skip_elem(val);
+  }
+  return false;
+}
+
+static bool rm_clusters_obj_scan(const jparse_ctx_t *jctx, json_tok_t *clusters_obj)
+{
+  if (!clusters_obj || clusters_obj->type != JSMN_OBJECT) {
+    return false;
+  }
+  json_tok_t *tok = clusters_obj;
+  int pairs = clusters_obj->size;
+  while (pairs--) {
+    tok++;
+    json_tok_t *key = tok;
+    tok++;
+    json_tok_t *val = tok;
+    if (key->type == JSMN_STRING && rm_tok_str_eq(jctx, key, "servers") &&
+        val->type == JSMN_OBJECT) {
+      if (rm_servers_obj_scan(jctx, val)) {
+        return true;
+      }
+    }
+    tok = rm_json_skip_elem(val);
+  }
+  return false;
+}
+
+static bool rm_endpoint_obj_scan(const jparse_ctx_t *jctx, json_tok_t *ep_obj)
+{
+  if (!ep_obj || ep_obj->type != JSMN_OBJECT) {
+    return false;
+  }
+  json_tok_t *tok = ep_obj;
+  int pairs = ep_obj->size;
+  while (pairs--) {
+    tok++;
+    json_tok_t *key = tok;
+    tok++;
+    json_tok_t *val = tok;
+    if (key->type == JSMN_STRING && rm_tok_str_eq(jctx, key, "clusters") &&
+        val->type == JSMN_OBJECT) {
+      if (rm_clusters_obj_scan(jctx, val)) {
+        return true;
+      }
+    }
+    tok = rm_json_skip_elem(val);
+  }
+  return false;
+}
+
+static bool rm_endpoints_obj_scan(const jparse_ctx_t *jctx, json_tok_t *endpoints_obj)
+{
+  if (!endpoints_obj || endpoints_obj->type != JSMN_OBJECT) {
+    return false;
+  }
+  json_tok_t *tok = endpoints_obj;
+  int pairs = endpoints_obj->size;
+  while (pairs--) {
+    tok++;
+    tok++;
+    json_tok_t *val = tok;
+    if (val->type == JSMN_OBJECT && rm_endpoint_obj_scan(jctx, val)) {
+      return true;
+    }
+    tok = rm_json_skip_elem(val);
+  }
+  return false;
+}
+
+/**
+ * Parse Matter metadata from the node object. @p jctx->cur must be the node
+ * object (first element of node_details). Sets dev->metadata_has_command_lists
+ * if Matter.endpoints.*.clusters.servers.* lists command IDs (add_command_list.md).
+ */
 static esp_err_t get_node_metadata(jparse_ctx_t *jctx, matter_device_t *dev) {
+  dev->metadata_has_command_lists = false;
   if (json_obj_get_object(jctx, "metadata") == 0) {
       if (json_obj_get_object(jctx, "Matter") == 0) {
+        if (json_obj_get_object(jctx, "endpoints") == 0) {
+          dev->metadata_has_command_lists =
+              rm_endpoints_obj_scan(jctx, jctx->cur);
+          json_obj_leave_object(jctx);
+        }
         int device_type = 0;
         if (json_obj_get_int(jctx, "deviceType", &device_type) == 0) {
           dev->endpoints[0].device_type_id = device_type;
@@ -1463,7 +1594,7 @@ static esp_err_t fetch_matter_node_metadata(const char *endpoint_url,
       "matter_dev cannot be NULL and it should have the rainmaker_node_id info");
 
   esp_err_t ret = ESP_OK;
-  char url[200];
+  char url[256];
   snprintf(url, sizeof(url), "%s/%s/%s?node_id=%s&%s", endpoint_url,
            HTTP_API_VERSION, "user/nodes", matter_dev->rainmaker_node_id,
            "node_details=true&is_matter=true&params=false");
@@ -1520,10 +1651,10 @@ static esp_err_t fetch_matter_node_metadata(const char *endpoint_url,
   }
   ESP_LOGD(TAG, "HTTP response payload: %s", http_payload);
 
-  // Parse the http response
   ESP_GOTO_ON_FALSE(
       json_parse_start(&jctx, http_payload, http_len) == 0, ESP_FAIL, close,
       TAG, "Failed to parse the HTTP response json on json_parse_start");
+  matter_dev->metadata_has_command_lists = false;
   if (json_obj_get_array(&jctx, "node_details", &node_count) == 0 &&
       node_count == 1) {
     if (json_arr_get_object(&jctx, 0) == 0) {
@@ -1535,7 +1666,6 @@ static esp_err_t fetch_matter_node_metadata(const char *endpoint_url,
           ESP_LOGE(TAG, "rainmaker_node_id does not match");
           ret = ESP_FAIL;
         } else {
-          get_node_reachable(&jctx, &(matter_dev->reachable));
           get_node_metadata(&jctx, matter_dev);
           matter_dev->is_metadata_fetched = true;
         }
@@ -1552,6 +1682,74 @@ cleanup:
   if (http_payload) {
     free(http_payload);
   }
+  return ret;
+}
+
+esp_err_t update_rainmaker_node_metadata(const char *endpoint_url,
+                                         const char *access_token,
+                                         const char *rainmaker_node_id,
+                                         const char *body_json) {
+  ESP_RETURN_ON_FALSE(endpoint_url, ESP_ERR_INVALID_ARG, TAG,
+                      "endpoint_url cannot be NULL");
+  ESP_RETURN_ON_FALSE(access_token, ESP_ERR_INVALID_ARG, TAG,
+                      "access_token cannot be NULL");
+  ESP_RETURN_ON_FALSE(rainmaker_node_id, ESP_ERR_INVALID_ARG, TAG,
+                      "rainmaker_node_id cannot be NULL");
+  ESP_RETURN_ON_FALSE(body_json, ESP_ERR_INVALID_ARG, TAG,
+                      "body_json cannot be NULL");
+
+  esp_err_t ret = ESP_OK;
+  char url[256];
+  char resp_buf[512];
+  snprintf(url, sizeof(url), "%s/%s/%s?node_id=%s", endpoint_url,
+           HTTP_API_VERSION, "user/nodes", rainmaker_node_id);
+
+  esp_http_client_config_t config = {
+      .url = url,
+      .transport_type = HTTP_TRANSPORT_OVER_SSL,
+      .buffer_size = 1536,
+      .buffer_size_tx = 4096,
+      .skip_cert_common_name_check = false,
+      .crt_bundle_attach = esp_crt_bundle_attach,
+  };
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  ESP_RETURN_ON_FALSE(client, ESP_FAIL, TAG,
+                      "Failed to initialise HTTP Client.");
+  ESP_GOTO_ON_ERROR(
+      esp_http_client_set_header(client, "accept", "application/json"), cleanup,
+      TAG, "Failed to set HTTP header accept");
+  ESP_GOTO_ON_ERROR(
+      esp_http_client_set_header(client, "Authorization", access_token),
+      cleanup, TAG, "Failed to set HTTP header Authorization");
+  ESP_GOTO_ON_ERROR(
+      esp_http_client_set_header(client, "Content-Type", "application/json"),
+      cleanup, TAG, "Failed to set HTTP header Content-Type");
+  ESP_GOTO_ON_ERROR(esp_http_client_set_method(client, HTTP_METHOD_PUT),
+                    cleanup, TAG, "Failed to set HTTP method");
+
+  size_t body_len = strlen(body_json);
+  ESP_GOTO_ON_ERROR(esp_http_client_open(client, (int)body_len), cleanup, TAG,
+                    "Failed to open HTTP connection");
+  int wlen = esp_http_client_write(client, body_json, (int)body_len);
+  ESP_GOTO_ON_FALSE(wlen == (int)body_len, ESP_FAIL, close, TAG,
+                    "Failed to write metadata payload");
+
+  int http_len = esp_http_client_fetch_headers(client);
+  int http_status_code = esp_http_client_get_status_code(client);
+  http_len = esp_http_client_read_response(client, resp_buf, sizeof(resp_buf) - 1);
+  resp_buf[http_len < 0 ? 0 : http_len] = 0;
+  if (http_status_code == 200) {
+    ESP_LOGI(TAG, "update_rainmaker_node_metadata response: %s", resp_buf);
+  } else {
+    ESP_LOGE(TAG, "update_rainmaker_node_metadata failed status=%d body=%s",
+             http_status_code, resp_buf);
+    ret = http_status_code == 401 ? ESP_ERR_INVALID_STATE : ESP_FAIL;
+  }
+
+close:
+  esp_http_client_close(client);
+cleanup:
+  esp_http_client_cleanup(client);
   return ret;
 }
 
