@@ -49,6 +49,7 @@ typedef enum {
     ATTR_REPORT_MSG_SUBSCRIPTION_TERMINATED,
     ATTR_REPORT_MSG_RESUBSCRIBE_RETRY,
     ATTR_REPORT_MSG_SUBSCRIBE_CONNECT_FAILED,
+    ATTR_REPORT_MSG_SUBSCRIPTION_ESTABLISHED,
 } attr_report_msg_type_t;
 
 typedef struct {
@@ -70,7 +71,7 @@ typedef struct node_state {
     uint64_t node_id;
     char rainmaker_node_id[ESP_RAINMAKER_NODE_ID_MAX_LEN];
     cJSON *root; /* endpoints -> 0xEP -> clusters -> servers -> 0xCID -> attributes -> 0xAID -> value */
-    bool online; /* true while subscription is active, false when subscription is terminated */
+    bool online; /* true after subscribe OnSubscriptionEstablished until subscription terminated */
     uint32_t fib_prev_sec;       /* Fibonacci backoff; first delay MATTER_ATTR_FIB_FIRST_SEC (e.g. 60,60,120,...) */
     uint32_t fib_cur_sec;
     esp_timer_handle_t resubscribe_timer;
@@ -308,7 +309,7 @@ static node_state_t *create_node_state(uint64_t node_id, const char *rainmaker_n
         free(ns);
         return NULL;
     }
-    ns->online = false; /* set true in attr_report_task when first attribute data arrives */
+    ns->online = false; /* set true in attr_report_task on ATTR_REPORT_MSG_SUBSCRIPTION_ESTABLISHED */
     ns->fib_prev_sec = 0;
     ns->fib_cur_sec = MATTER_ATTR_FIB_FIRST_SEC;
     ns->resubscribe_timer = NULL;
@@ -391,11 +392,35 @@ static void schedule_resubscribe_attempt(node_state_t *ns)
 
 static esp_err_t send_wildcard_subscribe(uint64_t node_id);
 
+/** Deep equality for JSON values (key order normalized via cjson_canonicalize). */
+static bool cjson_items_equal_canonical(const cJSON *a, const cJSON *b)
+{
+    if (!a || !b) {
+        return false;
+    }
+    cJSON *ca = cjson_canonicalize(a);
+    cJSON *cb = cjson_canonicalize(b);
+    if (!ca || !cb) {
+        cJSON_Delete(ca);
+        cJSON_Delete(cb);
+        return false;
+    }
+    char *sa = cJSON_PrintUnformatted(ca);
+    char *sb = cJSON_PrintUnformatted(cb);
+    cJSON_Delete(ca);
+    cJSON_Delete(cb);
+    bool eq = (sa && sb && strcmp(sa, sb) == 0);
+    cJSON_free(sa);
+    cJSON_free(sb);
+    return eq;
+}
+
 /*
  * Update tree at endpoints/0xEP/clusters/servers/0xCID/attributes/0xAID.
  * TLV decode uses JSON text; parse when possible. Nested object keys are hexified to 0x-prefixed ids.
+ * @return true if the attribute value at this path changed (or was newly set); false on OOM or no change.
  */
-static void update_attr_tree(cJSON *root, uint16_t endpoint_id, uint32_t cluster_id,
+static bool update_attr_tree(cJSON *root, uint16_t endpoint_id, uint32_t cluster_id,
                              uint32_t attribute_id, const char *value)
 {
     strip_legacy_attr_root(root);
@@ -413,14 +438,14 @@ static void update_attr_tree(cJSON *root, uint16_t endpoint_id, uint32_t cluster
         if (ep_obj) {
             cJSON_AddItemToObject(root, ep_key, ep_obj);
         } else {
-            return;
+            return false;
         }
     }
     cJSON *clusters_obj = cJSON_GetObjectItem(ep_obj, "clusters");
     if (!clusters_obj) {
         clusters_obj = cJSON_CreateObject();
         if (!clusters_obj) {
-            return;
+            return false;
         }
         cJSON_AddItemToObject(ep_obj, "clusters", clusters_obj);
     }
@@ -428,7 +453,7 @@ static void update_attr_tree(cJSON *root, uint16_t endpoint_id, uint32_t cluster
     if (!servers_obj) {
         servers_obj = cJSON_CreateObject();
         if (!servers_obj) {
-            return;
+            return false;
         }
         cJSON_AddItemToObject(clusters_obj, "servers", servers_obj);
     }
@@ -436,7 +461,7 @@ static void update_attr_tree(cJSON *root, uint16_t endpoint_id, uint32_t cluster
     if (!cluster_wrap) {
         cluster_wrap = cJSON_CreateObject();
         if (!cluster_wrap) {
-            return;
+            return false;
         }
         cJSON_AddItemToObject(servers_obj, cluster_key, cluster_wrap);
     }
@@ -444,52 +469,68 @@ static void update_attr_tree(cJSON *root, uint16_t endpoint_id, uint32_t cluster
     if (!attr_obj) {
         attr_obj = cJSON_CreateObject();
         if (!attr_obj) {
-            return;
+            return false;
         }
         cJSON_AddItemToObject(cluster_wrap, "attributes", attr_obj);
     }
-    cJSON_Delete(cJSON_DetachItemFromObject(attr_obj, attr_key));
+
+    cJSON *old = cJSON_DetachItemFromObject(attr_obj, attr_key);
 
     cJSON *parsed = NULL;
+    cJSON *new_item = NULL;
     if (value && value[0] != '\0') {
         parsed = cJSON_Parse(value);
     }
     if (parsed) {
         cjson_hexify_matter_keys(parsed);
-        cJSON_AddItemToObject(attr_obj, attr_key, parsed);
+        new_item = parsed;
     } else {
-        cJSON_AddItemToObject(attr_obj, attr_key, cJSON_CreateString(value ? value : ""));
+        new_item = cJSON_CreateString(value ? value : "");
     }
+    if (!new_item) {
+        if (old) {
+            cJSON_AddItemToObject(attr_obj, attr_key, old);
+        }
+        return false;
+    }
+
+    bool changed = false;
+    if (!old) {
+        changed = true;
+    } else if (!cjson_items_equal_canonical(old, new_item)) {
+        changed = true;
+    }
+
+    if (!changed) {
+        cJSON_Delete(new_item);
+        cJSON_AddItemToObject(attr_obj, attr_key, old);
+        return false;
+    }
+
+    cJSON_Delete(old);
+    cJSON_AddItemToObject(attr_obj, attr_key, new_item);
+    return true;
 }
 
-/* Build and report aggregated Matter devices map via RainMaker param (`esp.param.matter-attributes`). */
-static void publish_all_nodes_report(void)
+/**
+ * Publish a Matter-Devices delta (takes ownership of matter_devices_obj).
+ * Keys are 16-digit hex Matter node ids; values are per-node objects or JSON null for removal.
+ * esp_rmaker_param_update replaces the param string; consumers should merge patches by node id.
+ */
+static void publish_matter_devices_delta(cJSON *matter_devices_obj)
 {
     if (!s_attributes_param) {
+        if (matter_devices_obj) {
+            cJSON_Delete(matter_devices_obj);
+        }
+        return;
+    }
+    if (!matter_devices_obj) {
         return;
     }
 
-    cJSON *root = cJSON_CreateObject();
-    if (!root) {
-        return;
-    }
-    for (node_state_t *ns = s_node_states; ns != NULL; ns = ns->next) {
-        if (!ns->root) {
-            continue;
-        }
-        cJSON *wrapper = cJSON_CreateObject();
-        if (!wrapper) {
-            continue;
-        }
-        char node_key[32];
-        snprintf(node_key, sizeof(node_key), "%016llx", (unsigned long long)ns->node_id);
-        cJSON_AddItemToObject(wrapper, "rainmaker_node_id", cJSON_CreateString(ns->rainmaker_node_id));
-        cJSON_AddItemToObject(wrapper, "online", cJSON_CreateBool(ns->online));
-        cJSON_AddItemToObject(wrapper, "endpoints", cJSON_Duplicate(ns->root, 1));
-        cJSON_AddItemToObject(root, node_key, wrapper);
-    }
-    cJSON *canonical = cjson_canonicalize(root);
-    cJSON_Delete(root);
+    cJSON *canonical = cjson_canonicalize(matter_devices_obj);
+    cJSON_Delete(matter_devices_obj);
     if (!canonical) {
         return;
     }
@@ -512,6 +553,56 @@ static void publish_all_nodes_report(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to report matter attributes param: %s", esp_err_to_name(err));
     }
+}
+
+static void matter_node_key(char *out, size_t out_len, uint64_t node_id)
+{
+    snprintf(out, out_len, "%016llx", (unsigned long long)node_id);
+}
+
+static void publish_online_delta_for_node(uint64_t node_id, const char *rainmaker_node_id, bool online)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *wrapper = cJSON_CreateObject();
+    if (!root || !wrapper) {
+        cJSON_Delete(root);
+        cJSON_Delete(wrapper);
+        return;
+    }
+    char node_key[32];
+    matter_node_key(node_key, sizeof(node_key), node_id);
+    cJSON_AddItemToObject(wrapper, "rainmaker_node_id", cJSON_CreateString(rainmaker_node_id ? rainmaker_node_id : ""));
+    cJSON_AddItemToObject(wrapper, "online", cJSON_CreateBool(online));
+    cJSON_AddItemToObject(root, node_key, wrapper);
+    publish_matter_devices_delta(root);
+}
+
+static void publish_single_attr_delta(const node_state_t *ns, uint16_t endpoint_id, uint32_t cluster_id,
+                                      uint32_t attribute_id, const char *value)
+{
+    if (!ns) {
+        return;
+    }
+    cJSON *endpoints = cJSON_CreateObject();
+    if (!endpoints) {
+        return;
+    }
+    update_attr_tree(endpoints, endpoint_id, cluster_id, attribute_id, value);
+
+    cJSON *wrapper = cJSON_CreateObject();
+    cJSON *root = cJSON_CreateObject();
+    if (!wrapper || !root) {
+        cJSON_Delete(endpoints);
+        cJSON_Delete(wrapper);
+        cJSON_Delete(root);
+        return;
+    }
+    char node_key[32];
+    matter_node_key(node_key, sizeof(node_key), ns->node_id);
+    cJSON_AddItemToObject(wrapper, "rainmaker_node_id", cJSON_CreateString(ns->rainmaker_node_id));
+    cJSON_AddItemToObject(wrapper, "endpoints", endpoints);
+    cJSON_AddItemToObject(root, node_key, wrapper);
+    publish_matter_devices_delta(root);
 }
 
 static bool is_node_in_list(matter_device_t *list, uint64_t node_id)
@@ -556,6 +647,38 @@ static void on_subscribe_done_cb(uint64_t node_id, uint32_t subscription_id)
     if (s_attr_report_queue) {
         xQueueSend(s_attr_report_queue, &refresh, 0);
     }
+}
+
+void report_online(uint64_t remote_node_id)
+{
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    node_state_t *ns = find_node_state(remote_node_id);
+    if (ns && ns->online) {
+        xSemaphoreGive(s_state_mutex);
+        return;
+    }
+    if (!s_attr_report_queue) {
+        xSemaphoreGive(s_state_mutex);
+        return;
+    }
+    attr_report_msg_t m = {};
+    m.msg_type = ATTR_REPORT_MSG_SUBSCRIPTION_ESTABLISHED;
+    m.node_id = remote_node_id;
+    if (xQueueSend(s_attr_report_queue, &m, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Attr report queue full, drop subscription-established for 0x%llX",
+                 (unsigned long long)remote_node_id);
+    } else {
+       ns->online = true;
+    }
+    xSemaphoreGive(s_state_mutex);
+}
+
+/* CHIP stack: subscription active; defer state + RainMaker online delta to attr_report_task. */
+static void on_subscribe_established_cb(uint64_t remote_node_id, uint32_t subscription_id)
+{
+    (void)subscription_id;
+    (void)remote_node_id;
+    report_online(remote_node_id);
 }
 
 static void attr_report_task(void *arg)
@@ -614,8 +737,20 @@ static void attr_report_task(void *arg)
                              (unsigned long long)retry_node_id, esp_err_to_name(err));
                     schedule_resubscribe_attempt(ns);
                 }
-                /* Online / fib reset only when attribute data arrives; connect failure uses connect_failure_cb. */
-                publish_all_nodes_report();
+                /* Online true when subscription established; connect failure uses connect_failure_cb. */
+                publish_online_delta_for_node(ns->node_id, ns->rainmaker_node_id, false);
+            }
+            xSemaphoreGive(s_state_mutex);
+            continue;
+        }
+
+        if (msg.msg_type == ATTR_REPORT_MSG_SUBSCRIPTION_ESTABLISHED) {
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            node_state_t *ns_est = find_node_state(msg.node_id);
+            if (ns_est) {
+                stop_resubscribe_timer(ns_est);
+                reset_fib_backoff(ns_est);
+                publish_online_delta_for_node(ns_est->node_id, ns_est->rainmaker_node_id, true);
             }
             xSemaphoreGive(s_state_mutex);
             continue;
@@ -632,10 +767,8 @@ static void attr_report_task(void *arg)
                 } else {
                     ESP_LOGW(TAG, "Failed to alloc empty attr root for 0x%llX", (unsigned long long)msg.node_id);
                 }
-                publish_all_nodes_report();
+                publish_online_delta_for_node(nst->node_id, nst->rainmaker_node_id, false);
                 schedule_resubscribe_attempt(nst);
-            } else {
-                publish_all_nodes_report();
             }
             xSemaphoreGive(s_state_mutex);
             continue;
@@ -654,9 +787,9 @@ static void attr_report_task(void *arg)
         }
         stop_resubscribe_timer(ns);
         reset_fib_backoff(ns);
-        ns->online = true;
-        update_attr_tree(ns->root, msg.endpoint_id, msg.cluster_id, msg.attribute_id, msg.value);
-        publish_all_nodes_report();
+        if (update_attr_tree(ns->root, msg.endpoint_id, msg.cluster_id, msg.attribute_id, msg.value)) {
+            publish_single_attr_delta(ns, msg.endpoint_id, msg.cluster_id, msg.attribute_id, msg.value);
+        }
         xSemaphoreGive(s_state_mutex);
     }
 }
@@ -670,6 +803,8 @@ static void on_attribute_data_cb(uint64_t remote_node_id, const chip::app::Concr
     if (status.ToChipError() != CHIP_NO_ERROR) {
         return;
     }
+    report_online(remote_node_id);
+
     attr_report_msg_t msg = {};
     msg.msg_type = ATTR_REPORT_MSG_ATTRIBUTE_DATA;
     msg.node_id = remote_node_id;
@@ -691,8 +826,8 @@ static esp_err_t send_wildcard_subscribe(uint64_t node_id)
 {
     esp_matter::lock::ScopedChipStackLock chip_lock(portMAX_DELAY);
     subscribe_command *cmd = chip::Platform::New<subscribe_command>(
-        node_id, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF, SUBSCRIBE_ATTRIBUTE, 0, 60, true, on_attribute_data_cb, nullptr, nullptr,
-        on_subscribe_done_cb, on_subscribe_connect_failure_cb);
+        node_id, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF, SUBSCRIBE_ATTRIBUTE, 0, 60, true, on_attribute_data_cb, nullptr,
+        on_subscribe_established_cb, on_subscribe_done_cb, on_subscribe_connect_failure_cb);
     if (!cmd) {
         return ESP_ERR_NO_MEM;
     }
@@ -705,7 +840,7 @@ esp_err_t matter_attr_report_init(esp_rmaker_param_t *attributes_param)
 {
     s_attributes_param = attributes_param;
     if (!s_attributes_param) {
-        ESP_LOGW(TAG, "Matter attributes param is NULL; attribute snapshot will not be reported");
+        ESP_LOGW(TAG, "Matter-Devices param is NULL; Matter attribute deltas will not be reported");
     }
 
     if (s_attr_report_queue != NULL) {
@@ -791,6 +926,18 @@ void matter_attr_report_on_device_list_updated(void)
         for (matter_device_t *d = dev_list; d != NULL; d = d->next) {
             if (!find_node_state(d->node_id)) {
                 subscribe_node(d->node_id, d->rainmaker_node_id);
+            }
+        }
+
+        if (removed_count > 0) {
+            cJSON *removal = cJSON_CreateObject();
+            if (removal) {
+                for (size_t i = 0; i < removed_count; i++) {
+                    char node_key[32];
+                    matter_node_key(node_key, sizeof(node_key), removed_node_ids[i]);
+                    cJSON_AddItemToObject(removal, node_key, cJSON_CreateNull());
+                }
+                publish_matter_devices_delta(removal);
             }
         }
 
