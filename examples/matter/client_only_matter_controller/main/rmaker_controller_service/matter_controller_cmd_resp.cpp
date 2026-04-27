@@ -30,6 +30,7 @@
 #include <app/MessageDef/StatusIB.h>
 #include <app/WriteClient.h>
 #include <lib/core/DataModelTypes.h>
+#include <lib/core/Optional.h>
 #include <lib/support/ScopedBuffer.h>
 #include <lib/support/CHIPMem.h>
 #include <lib/core/NodeId.h>
@@ -453,13 +454,14 @@ static void read_error_fcn(uint64_t node_id, CHIP_ERROR error)
 }
 
 esp_err_t invoke_cluster_command(uint64_t destination_id, uint16_t endpoint_id, uint32_t cluster_id,
-                                 uint32_t command_id, const char *command_data_field)
+                                 uint32_t command_id, const char *command_data_field,
+                                 const chip::Optional<uint16_t> timed_interaction_timeout_ms)
 {
     ESP_LOGI(TAG, "Send cluster command [cluster 0x%lx, command 0x%lx] to node %llx endpoint %x", cluster_id, command_id,
              destination_id, endpoint_id);
     controller::cluster_command *cluster_command =
         chip::Platform::New<controller::cluster_command>(destination_id, endpoint_id, cluster_id, command_id, command_data_field,
-                                                         chip::NullOptional, invoke_cmd_success_fcn, invoke_cmd_failure_fcn,
+                                                         timed_interaction_timeout_ms, invoke_cmd_success_fcn, invoke_cmd_failure_fcn,
                                                          invoke_cmd_connect_failure_fcn);
     if (!cluster_command) {
         return ESP_ERR_NO_MEM;
@@ -492,6 +494,7 @@ esp_err_t esp_rmaker_matter_controller_invoke_cmd_handler(const void *in_data, s
         return ESP_ERR_INVALID_STATE;
     }
     size_t response_len = 0;
+    chip::Optional<uint16_t> timed_interaction_timeout_ms = chip::NullOptional;
     ESP_LOGI(TAG, "Receive invoke-command command: %.*s", (int)in_len, (char *)in_data);
     // Parse the input JSON to build the cluster_command class
     jparse_ctx_t jctx;
@@ -509,6 +512,10 @@ esp_err_t esp_rmaker_matter_controller_invoke_cmd_handler(const void *in_data, s
             if (cluster_id == chip::kInvalidClusterId || command_id == chip::kInvalidCommandId) {
                 json_parse_end(&jctx);
                 return ESP_FAIL;
+            }
+            int timed_interaction_timeout = 0;
+            if (json_obj_get_int(&jctx, "timed_interaction_timeout", &timed_interaction_timeout) == 0) {
+                timed_interaction_timeout_ms.SetValue((uint16_t)timed_interaction_timeout);
             }
             int command_field_len = 0;
             if (json_obj_get_object_strlen(&jctx, "command_fields", &command_field_len) != 0) {
@@ -548,7 +555,7 @@ esp_err_t esp_rmaker_matter_controller_invoke_cmd_handler(const void *in_data, s
                         endpoint_id = string_to_uint16(id_buffer);
                     }
                     if (node_id != chip::kUndefinedNodeId && endpoint_id != chip::kInvalidEndpointId) {
-                        if (invoke_cluster_command(node_id, endpoint_id, cluster_id, command_id, command_fields_buffer) != ESP_OK) {
+                        if (invoke_cluster_command(node_id, endpoint_id, cluster_id, command_id, command_fields_buffer, timed_interaction_timeout_ms) != ESP_OK) {
                             json_gen_obj_set_string(&s_resp_jstr, "status", "failure");
                         }
                     } else {

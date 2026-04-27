@@ -266,6 +266,9 @@ static void cjson_hexify_matter_keys(cJSON *item)
         {
             cjson_hexify_matter_keys(el);
         }
+    } else if (cJSON_IsNull(item)) {
+        cJSON_Delete(item);
+        item = cJSON_CreateString("Null");
     }
 }
 
@@ -886,10 +889,6 @@ static esp_err_t subscribe_node(uint64_t node_id, const char *rainmaker_node_id)
 void matter_attr_report_on_device_list_updated(void)
 {
     matter_device_t *dev_list = fetch_device_list();
-    if (!dev_list) {
-        return;
-    }
-
     uint64_t removed_node_ids[MATTER_ATTR_MAX_REMOVED_PER_UPDATE];
     size_t removed_count = 0;
 
