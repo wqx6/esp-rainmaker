@@ -744,7 +744,7 @@ static esp_err_t fetch_device_noc(const char *endpoint_url,
   json_gen_push_array(&jstr, "csr_requests");
   json_gen_start_object(&jstr);
   if (csr_type == CSR_TYPE_CONTROLLER) {
-    json_gen_obj_set_string(&jstr, "role", "secondary");
+    json_gen_obj_set_string(&jstr, "role", "primary");
     json_gen_obj_set_string(&jstr, "matter_node_id", matter_node_id_str);
   }
   json_gen_obj_set_string(&jstr, "group_id", (char *)rainmaker_group_id);
