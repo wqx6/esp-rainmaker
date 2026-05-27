@@ -15,6 +15,8 @@
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <esp_event.h>
+#include <esp_netif.h>
+#include <esp_wifi.h>
 #include <nvs_flash.h>
 
 #include <esp_rmaker_core.h>
@@ -25,10 +27,10 @@
 #include <esp_rmaker_scenes.h>
 #include <esp_rmaker_console.h>
 #include <esp_rmaker_ota.h>
+#include <esp_rmaker_user_mapping.h>
 
 #include <esp_rmaker_common_events.h>
 
-#include <app_wifi.h>
 #include <app_insights.h>
 #include <app_matter_device_manager.h>
 #include <matter_attr_report.h>
@@ -45,6 +47,166 @@
 
 static const char *TAG = "app_main";
 esp_rmaker_device_t *matter_controller_device;
+static bool s_matter_controller_updated;
+
+static void init_matter_controller()
+{
+    ESP_ERROR_CHECK(esp_matter::start(NULL));
+    {
+        esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
+        esp_matter::controller::matter_controller_client::get_instance().init(0, 0, 5580);
+    }
+    esp_matter::console::controller_register_commands();
+    esp_matter::console::ctl_dev_mgr_register_commands();
+    matter_attr_report_init(matter_controller_get_matter_devices_param());
+    init_device_manager(matter_attr_report_on_device_list_updated);
+}
+
+static void update_matter_controller_task(void *arg)
+{
+    // Refresh controller state only after Wi-Fi is up so REST and reporting paths can use the network.
+    matter_controller_handle_update();
+    vTaskDelete(NULL);
+}
+
+static void update_matter_controller_once()
+{
+    if (s_matter_controller_updated) {
+        return;
+    }
+    s_matter_controller_updated = true;
+    if (xTaskCreate(update_matter_controller_task, "matter_ctl_update", 8192, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Matter controller update task");
+        s_matter_controller_updated = false;
+    }
+}
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            ESP_LOGD(TAG, "Wi-Fi connect skipped: %s", esp_err_to_name(err));
+        }
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
+        esp_wifi_connect();
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+        ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
+        update_matter_controller_once();
+    }
+}
+
+static void app_wifi_init()
+{
+    esp_err_t err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(err);
+    }
+    ESP_ERROR_CHECK(esp_netif_init());
+    esp_netif_create_default_wifi_sta();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
+}
+
+static void app_wifi_start()
+{
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+}
+
+namespace esp_matter {
+namespace console {
+
+static engine rmaker_console;
+
+static esp_err_t rmaker_wifi_prov_handler(int argc, char *argv[])
+{
+    if (argc < 1 || argc > 2) {
+        ESP_LOGE(TAG, "Usage: matter esp rmaker wifi-prov <ssid> [passphrase]");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wifi_config_t wifi_config = {};
+    strlcpy((char *)wifi_config.sta.ssid, argv[0], sizeof(wifi_config.sta.ssid));
+    if (argc == 2) {
+        strlcpy((char *)wifi_config.sta.password, argv[1], sizeof(wifi_config.sta.password));
+    }
+
+    esp_err_t err = esp_wifi_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGW(TAG, "Failed to stop Wi-Fi: %s", esp_err_to_name(err));
+    }
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wifi_config), TAG, "Failed to set Wi-Fi config");
+    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "Failed to start Wi-Fi");
+    ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "Failed to connect Wi-Fi");
+    return ESP_OK;
+}
+
+static esp_err_t rmaker_get_node_id_handler(int argc, char *argv[])
+{
+    if (argc != 0) {
+        ESP_LOGE(TAG, "Usage: matter esp rmaker get-node-id");
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_LOGI(TAG, "Node ID: %s", esp_rmaker_get_node_id());
+    return ESP_OK;
+}
+
+static esp_err_t rmaker_add_user_handler(int argc, char *argv[])
+{
+    if (argc != 2) {
+        ESP_LOGE(TAG, "Usage: matter esp rmaker add-user <user_id> <secret_key>");
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_LOGI(TAG, "Starting user-node mapping");
+    return esp_rmaker_start_user_node_mapping(argv[0], argv[1]);
+}
+
+static esp_err_t rmaker_dispatch(int argc, char *argv[])
+{
+    if (argc <= 0) {
+        rmaker_console.for_each_command(print_description, NULL);
+        return ESP_OK;
+    }
+    return rmaker_console.exec_command(argc, argv);
+}
+
+static esp_err_t rmaker_register_commands()
+{
+    static const command_t command = {
+        .name = "rmaker",
+        .description = "RainMaker setup commands. Usage: matter esp rmaker <command_name>",
+        .handler = rmaker_dispatch,
+    };
+    static const command_t rmaker_commands[] = {
+        {
+            .name = "wifi-prov",
+            .description = "Connect to Wi-Fi. Usage: matter esp rmaker wifi-prov <ssid> [passphrase]",
+            .handler = rmaker_wifi_prov_handler,
+        },
+        {
+            .name = "get-node-id",
+            .description = "Print the RainMaker node ID. Usage: matter esp rmaker get-node-id",
+            .handler = rmaker_get_node_id_handler,
+        },
+        {
+            .name = "add-user",
+            .description = "Start user-node association. Usage: matter esp rmaker add-user <user_id> <secret_key>",
+            .handler = rmaker_add_user_handler,
+        },
+    };
+
+    ESP_RETURN_ON_ERROR(rmaker_console.register_commands(rmaker_commands, sizeof(rmaker_commands) / sizeof(command_t)),
+                        TAG, "Failed to register RainMaker subcommands");
+    return add_commands(&command, 1);
+}
+
+} // namespace console
+} // namespace esp_matter
 
 /* Callback to handle commands received from the RainMaker cloud */
 static esp_err_t write_cb(const esp_rmaker_device_t *device, const esp_rmaker_param_t *param,
@@ -72,9 +234,10 @@ extern "C" void app_main()
     }
     ESP_ERROR_CHECK(err);
 
-    /* Initialize Wi-Fi. Note that, this should be called before esp_rmaker_node_init()
-     */
-    app_network_init();
+    app_wifi_init();
+
+    esp_matter::console::diagnostics_register_commands();
+    ESP_ERROR_CHECK(esp_matter::console::rmaker_register_commands());
 
     /* Initialize the ESP RainMaker Agent.
      * Note that this should be called after app_wifi_init() but before app_wifi_start()
@@ -135,32 +298,7 @@ extern "C" void app_main()
     /* Start the ESP RainMaker Agent */
     esp_rmaker_start();
 
-    err = app_network_set_custom_mfg_data(MGF_DATA_DEVICE_TYPE_MATTER_CONTROLLER,
-                                       MFG_DATA_DEVICE_SUBTYPE_MATTER_CONTROLLER);
-    /* Start the Wi-Fi.
-     * If the node is provisioned, it will start connection attempts,
-     * else, it will start Wi-Fi provisioning. The function will return
-     * after a connection has been successfully established
-     */
-    err = app_network_start(POP_TYPE_RANDOM);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Could not start Wifi. Aborting!!!");
-        vTaskDelay(5000/portTICK_PERIOD_MS);
-        abort();
-    }
-
-    // Start matter
-    esp_matter::start(NULL);
-    {
-        esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
-        esp_matter::controller::matter_controller_client::get_instance().init(0, 0, 5580);
-    }
-    esp_matter::console::diagnostics_register_commands();
-    esp_matter::console::init();
-    esp_matter::console::controller_register_commands();
-    esp_matter::console::ctl_dev_mgr_register_commands();
-    matter_attr_report_init(matter_controller_get_matter_devices_param());
-    init_device_manager(matter_attr_report_on_device_list_updated);
-    // Update matter controller handler after join to Wi-Fi network
-    matter_controller_handle_update();
+    init_matter_controller();
+    ESP_ERROR_CHECK(esp_matter::console::init());
+    app_wifi_start();
 }

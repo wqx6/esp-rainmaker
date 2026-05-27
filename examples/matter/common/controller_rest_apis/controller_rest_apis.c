@@ -23,6 +23,7 @@
 #include <json_parser.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/pem.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -31,6 +32,45 @@
 #define TAG "RMAKER_REST"
 #define HTTP_API_VERSION "v1"
 #define IPK_BYTES_LEN 16
+#define TOKEN_GRANT_TYPE_ENCODED "urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer"
+#define TOKEN_IDENTITY_PROVIDER "XThings"
+
+static bool is_form_urlencoded_unreserved(char c) {
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+         (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+         c == '~';
+}
+
+static esp_err_t form_urlencode(const char *src, char *dst, size_t dst_len) {
+  static const char hex[] = "0123456789ABCDEF";
+  size_t pos = 0;
+
+  ESP_RETURN_ON_FALSE(src, ESP_ERR_INVALID_ARG, TAG, "src cannot be NULL");
+  ESP_RETURN_ON_FALSE(dst, ESP_ERR_INVALID_ARG, TAG, "dst cannot be NULL");
+  ESP_RETURN_ON_FALSE(dst_len > 0, ESP_ERR_INVALID_ARG, TAG,
+                      "dst_len cannot be 0");
+
+  while (*src) {
+    unsigned char ch = (unsigned char)*src++;
+    if (is_form_urlencoded_unreserved((char)ch)) {
+      ESP_RETURN_ON_FALSE(pos + 1 < dst_len, ESP_ERR_NO_MEM, TAG,
+                          "URL encoded buffer too small");
+      dst[pos++] = (char)ch;
+    } else if (ch == ' ') {
+      ESP_RETURN_ON_FALSE(pos + 1 < dst_len, ESP_ERR_NO_MEM, TAG,
+                          "URL encoded buffer too small");
+      dst[pos++] = '+';
+    } else {
+      ESP_RETURN_ON_FALSE(pos + 3 < dst_len, ESP_ERR_NO_MEM, TAG,
+                          "URL encoded buffer too small");
+      dst[pos++] = '%';
+      dst[pos++] = hex[ch >> 4];
+      dst[pos++] = hex[ch & 0x0F];
+    }
+  }
+  dst[pos] = 0;
+  return ESP_OK;
+}
 
 esp_err_t fetch_access_token(const char *endpoint_url,
                              const char *refresh_token, char *access_token,
@@ -41,11 +81,19 @@ esp_err_t fetch_access_token(const char *endpoint_url,
                       "refresh_token cannot be NULL");
   ESP_RETURN_ON_FALSE(access_token, ESP_ERR_INVALID_ARG, TAG,
                       "access_token cannot be NULL");
+  ESP_RETURN_ON_FALSE(access_token_buf_len > 0, ESP_ERR_INVALID_ARG, TAG,
+                      "access_token_buf_len cannot be 0");
 
   esp_err_t ret = ESP_OK;
-  char url[100];
-  snprintf(url, sizeof(url), "%s/%s/%s", endpoint_url, HTTP_API_VERSION,
-           "login2");
+  char url[256];
+  size_t endpoint_url_len = strnlen(endpoint_url, sizeof(url));
+  if (endpoint_url_len >= strlen("/token") &&
+      strcmp(endpoint_url + endpoint_url_len - strlen("/token"), "/token") ==
+          0) {
+    snprintf(url, sizeof(url), "%s", endpoint_url);
+  } else {
+    snprintf(url, sizeof(url), "%s/%s", endpoint_url, "token");
+  }
   esp_http_client_config_t config = {
       .url = url,
       .transport_type = HTTP_TRANSPORT_OVER_SSL,
@@ -54,11 +102,11 @@ esp_err_t fetch_access_token(const char *endpoint_url,
       .crt_bundle_attach = esp_crt_bundle_attach,
   };
   char *http_payload = NULL;
+  char *encoded_assertion = NULL;
   const size_t http_payload_size = 4096;
   size_t http_payload_len = 0;
   int http_len, http_status_code;
   int access_token_len;
-  json_gen_str_t jstr;
   jparse_ctx_t jctx;
 
   // Initialize http client
@@ -69,26 +117,36 @@ esp_err_t fetch_access_token(const char *endpoint_url,
       esp_http_client_set_header(client, "accept", "application/json"), cleanup,
       TAG, "Failed to set HTTP header accept");
   ESP_GOTO_ON_ERROR(
-      esp_http_client_set_header(client, "Content-Type", "application/json"),
+      esp_http_client_set_header(client, "Content-Type",
+                                 "application/x-www-form-urlencoded"),
       cleanup, TAG, "Failed to set HTTP header Content-Type");
   ESP_GOTO_ON_ERROR(esp_http_client_set_method(client, HTTP_METHOD_POST),
                     cleanup, TAG, "Failed to set HTTP method");
 
   // Prepare the payload for http write and read
-  // The http response will include id_token and access_token, so we allocate 4K
-  // Bytes buffer for the reponse.
+  // The HTTP response will include access_token, so we allocate 4K bytes for
+  // both the form-encoded request and the response.
   http_payload = (char *)MEM_CALLOC_EXTRAM(http_payload_size, sizeof(char));
   ESP_GOTO_ON_FALSE(http_payload, ESP_ERR_NO_MEM, cleanup, TAG,
                     "Failed to alloc memory for http_payload");
-  json_gen_str_start(&jstr, http_payload, http_payload_size - 1, NULL, NULL);
-  json_gen_start_object(&jstr);
-  json_gen_obj_set_string(&jstr, "refreshtoken", (char *)refresh_token);
-  json_gen_end_object(&jstr);
-  json_gen_str_end(&jstr);
+  encoded_assertion =
+      (char *)MEM_CALLOC_EXTRAM(strlen(refresh_token) * 3 + 1, sizeof(char));
+  ESP_GOTO_ON_FALSE(encoded_assertion, ESP_ERR_NO_MEM, cleanup, TAG,
+                    "Failed to alloc memory for encoded_assertion");
+  ESP_GOTO_ON_ERROR(form_urlencode(refresh_token, encoded_assertion,
+                                   strlen(refresh_token) * 3 + 1),
+                    cleanup, TAG, "Failed to URL encode assertion");
+  http_payload_len = snprintf(http_payload, http_payload_size,
+                              "grant_type=%s&identity_provider=%s&assertion=%s",
+                              TOKEN_GRANT_TYPE_ENCODED, TOKEN_IDENTITY_PROVIDER,
+                              encoded_assertion);
+  free(encoded_assertion);
+  encoded_assertion = NULL;
+  ESP_GOTO_ON_FALSE(http_payload_len < http_payload_size, ESP_ERR_NO_MEM,
+                    cleanup, TAG, "HTTP payload buffer too small");
   ESP_LOGD(TAG, "HTTP write payload: %s", http_payload);
 
   // Send POST data
-  http_payload_len = strnlen(http_payload, http_payload_size - 1);
   ESP_GOTO_ON_ERROR(esp_http_client_open(client, http_payload_len), cleanup,
                     TAG, "Failed to open HTTP connection");
   http_len = esp_http_client_write(client, http_payload, http_payload_len);
@@ -118,12 +176,18 @@ esp_err_t fetch_access_token(const char *endpoint_url,
   ESP_GOTO_ON_FALSE(
       json_parse_start(&jctx, http_payload, http_len) == 0, ESP_FAIL, close,
       TAG, "Failed to parse the HTTP response json on json_parse_start");
-  if (json_obj_get_strlen(&jctx, "accesstoken", &access_token_len) != 0 ||
-      access_token_len >= access_token_buf_len ||
-      json_obj_get_string(&jctx, "accesstoken", access_token,
-                          access_token_buf_len - 1) != 0) {
+  if (json_obj_get_strlen(&jctx, "access_token", &access_token_len) != 0) {
     ESP_LOGE(TAG,
-             "Failed to parse the access token from the HTTP response json");
+             "Failed to find access_token in the HTTP response json");
+    ret = ESP_ERR_INVALID_RESPONSE;
+  } else if (access_token_len >= access_token_buf_len) {
+    ESP_LOGE(TAG, "access_token buffer too small. token_len=%d, buf_len=%u",
+             access_token_len, (unsigned)access_token_buf_len);
+    ret = ESP_ERR_NO_MEM;
+  } else if (json_obj_get_string(&jctx, "access_token", access_token,
+                                 access_token_buf_len) != 0) {
+    ESP_LOGE(TAG,
+             "Failed to parse access_token from the HTTP response json");
     ret = ESP_ERR_INVALID_RESPONSE;
   } else {
     access_token[access_token_len] = 0;
@@ -135,6 +199,9 @@ cleanup:
   esp_http_client_cleanup(client);
   if (http_payload) {
     free(http_payload);
+  }
+  if (encoded_assertion) {
+    free(encoded_assertion);
   }
   return ret;
 }

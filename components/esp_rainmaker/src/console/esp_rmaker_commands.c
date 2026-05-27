@@ -85,12 +85,16 @@ static int wifi_prov_handler(int argc, char** argv)
         memcpy(wifi_config.sta.password, argv[2], strlen(argv[2]));
     }
 
-    /* If device is still provisioning, use  network_prov_mgr_configure_wifi_sta/wifi_prov_mgr_configure_sta */
+    /* If a provisioning session is active, let the provisioning manager consume the credentials.
+     * Console-only examples do not initialize the manager, so fall back to direct STA configuration.
+     */
     bool provisioned = false;
     network_prov_mgr_is_wifi_provisioned(&provisioned);
     if (!provisioned) { // provisioning in progress
-        network_prov_mgr_configure_wifi_sta(&wifi_config);
-        return ESP_OK;
+        esp_err_t err = network_prov_mgr_configure_wifi_sta(&wifi_config);
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
     }
 
     /* If already provisioned, just set the new credentials */

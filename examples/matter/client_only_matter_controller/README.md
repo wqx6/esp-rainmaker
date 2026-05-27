@@ -6,9 +6,9 @@ Follow the ESP RainMaker Documentation [Get Started](https://rainmaker.espressif
 
 ## What to expect in this example?
 
-- This example uses [network_provision](https://github.com/espressif/idf-extra-components/tree/master/network_provisioning) to provision Matter Controller into Wi-Fi network.
+- This example uses the UART console and [esp-rainmaker-cli](https://github.com/wqx6/esp-rainmaker-cli/tree/support_JWT_token) to connect the Matter Controller to Wi-Fi and to complete RainMaker user-node association.
 
-- After provisioning, the [Phone APP](https://github.com/espressif/esp-rainmaker/blob/master/README.md#phone-apps) can setup the controller by the [Matter Controller service](./main/rmaker_controller_service/SPEC.md).
+- After Wi-Fi connection and user-node association, the esp-rainmaker-cli can setup the controller by the [Matter Controller service](./main/rmaker_controller_service/SPEC.md).
 
 - Use [Command Response](https://docs.rainmaker.espressif.com/docs/dev/firmware/fw_usage_guides/command-response-usage) to send Matter commands to Matter End-Devices remotely.
 
@@ -16,11 +16,81 @@ Follow the ESP RainMaker Documentation [Get Started](https://rainmaker.espressif
 
 ## Steps to use this example
 
-- Use RainMaker Phone App to provision the Matter Controller example to RainMaker home as a basic RainMaker device.
+- Login with JWT token:
 
-- After provisioning, click the button to setup the controller in the Phone APP. You need to select which group (Matter Fabric) that the controller will join.
+  ```
+  esp-rainmaker-cli login --jwt-token <jwt_token>
+  ```
 
-- After the controller is setup the controller will fetch the Matter device list and start to report the attributes' value of each device.
+- Flash the firmware and monitor the serial console.
+
+- Connect the controller to Wi-Fi from the console:
+
+  ```
+  matter esp rmaker wifi-prov <ssid> [passphrase]
+  ```
+
+  For an open network, omit the passphrase. Wait for the device to get an IP address and connect to RainMaker.
+
+- Print the RainMaker node ID if needed:
+
+  ```
+  matter esp rmaker get-node-id
+  ```
+
+- User Node Association
+
+  Using rainmaker cli:
+
+  ```
+  esp-rainmaker-cli test --addnode <rmake_node_id>
+  ```
+
+  This command will print shared_secret and user id which can be use in the following command
+
+- Complete user-node association from the console:
+
+  ```
+  matter esp rmaker add-user <user_id> <secret_key>
+  ```
+
+  Use the `user_id` and `secret_key` generated for the RainMaker user-node mapping flow by the RainMaker app, CLI, or user-node mapping API. After this command succeeds, the node is associated with that RainMaker user.
+
+- Check whether the controller is added to rainmaker:
+
+  ```
+  esp-rainmaker-cli getnodes
+  ```
+
+  You can see the controller's node ID in the results.
+
+- The same console also hosts Matter controller commands. RainMaker setup commands are available under `matter esp rmaker ...`, while controller commands are available after Wi-Fi is connected and the Matter stack starts, for example:
+
+  ```
+  matter esp controller help
+  ```
+
+- After user-node association, use rainmaker-cli to setup the controller so that the controller can get its NOC chain:
+
+  ```
+  esp-rainmaker-cli setparams --data '{"MatterCTLR": {"BaseURL": "<base-url>", "UserToken": "<jwt-token>", "RMakerGroupID": "<rainmaker-group-id>"}}' <controller-node-id>
+  ```
+
+  **NOTE**: If you didn't create any rainmaker-group(matter fabric), you can create it with this API:
+
+  ```
+  curl -X 'POST' \
+  '<base-url>/v1/user/node_group' \
+  -H 'accept: application/json' \
+  -H 'Authorization: <access-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "is_matter": true,
+  "group_name": "group_name"
+  }'
+  ```
+
+- After the controller is setup, the controller will fetch the Matter device list and start to report the attributes' value of each device.
 
 - You can use the esp-rainmaker-cli to send the Matter command requests remotely.
 
