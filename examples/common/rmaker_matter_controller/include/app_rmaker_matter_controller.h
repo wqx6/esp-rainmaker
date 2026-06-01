@@ -151,6 +151,8 @@ esp_err_t app_rmaker_matter_controller_get_stored_keypair_and_controller_noc(uin
                                                                              uint8_t *serialized_keypair,
                                                                              size_t *serialized_keypair_len);
 
+esp_rmaker_param_t *app_rmaker_matter_controller_get_matter_devices();
+
 /**
  * @brief Update the local matter device list to the latest one from Rainmaker cloud
  *

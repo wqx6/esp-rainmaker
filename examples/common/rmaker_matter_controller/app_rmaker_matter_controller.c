@@ -70,9 +70,9 @@ static esp_err_t matter_controller_setup_controller(matter_controller_handle_t *
         return ESP_OK;
     }
     esp_err_t err = ESP_OK;
+    uint64_t fabric_id = 0ULL;
     if (handle->setup_callback) {
         if (!handle->is_setup_successfully_before) {
-            uint64_t fabric_id = 0ULL;
             uint8_t ipk_value[ESP_MATTER_IPK_LEN];
             size_t ipk_len = ESP_MATTER_IPK_LEN;
             ESP_RETURN_ON_ERROR(matter_controller_authorize(handle), TAG, "Failed to authorize");
@@ -85,7 +85,9 @@ static esp_err_t matter_controller_setup_controller(matter_controller_handle_t *
             err = handle->setup_callback(ipk_value, ipk_len, fabric_id);
         } else {
             ESP_LOGI(TAG, "Controller has been successfully set up before");
-            err = handle->setup_callback(NULL, 0, 0);
+            ESP_RETURN_ON_ERROR(app_rmaker_api_get_matter_fabric_id(handle->rmaker_group_id, &fabric_id), TAG,
+                                "Failed to get fabric ID");
+            err = handle->setup_callback(NULL, 0, fabric_id);
         }
     } else {
         ESP_LOGE(TAG, "Please register a setup callback before calling app_rmaker_matter_controller_enable");
@@ -562,4 +564,12 @@ exit:
     s_matter_controller_handle = NULL;
     esp_event_handler_unregister(RMAKER_AUTH_SERVICE_EVENT, ESP_EVENT_ANY_ID, &matter_ctl_auth_event_handler);
     return ret;
+}
+
+esp_rmaker_param_t *app_rmaker_matter_controller_get_matter_devices()
+{
+    if (s_matter_controller_handle->service) {
+        return matter_controller_get_matter_devices_param();
+    }
+    return NULL;
 }

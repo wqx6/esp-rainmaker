@@ -32,6 +32,23 @@ static esp_rmaker_param_t *matter_controller_matter_ctl_status_param_create(cons
     return param;
 }
 
+static esp_rmaker_param_t *matter_controller_matter_devices_param_create(const char *param_name)
+{
+    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_DEVICES,
+                                                        esp_rmaker_obj("{}"), PROP_FLAG_READ);
+    return param;
+}
+
+static esp_rmaker_param_t *matter_controller_matter_devices_data_ver_param_create(const char *param_name)
+{
+    esp_rmaker_param_t *param = esp_rmaker_param_create(param_name, ESP_RMAKER_PARAM_MATTER_DEVICES_DATA_VER,
+                                                        esp_rmaker_str("1.1.0"), PROP_FLAG_READ);
+
+    return param;
+}
+
+static esp_rmaker_param_t *s_matter_devices_param = NULL;
+
 esp_rmaker_device_t *matter_controller_setup_service_create(const char *serv_name,
                                                             esp_rmaker_device_bulk_write_cb_t bulk_write_cb,
                                                             esp_rmaker_device_bulk_read_cb_t bulk_read_cb,
@@ -48,6 +65,15 @@ esp_rmaker_device_t *matter_controller_setup_service_create(const char *serv_nam
                                     matter_controller_matter_ctl_cmd_param_create(ESP_RMAKER_DEF_MATTER_CTL_CMD_NAME));
         esp_rmaker_device_add_param(
             service, matter_controller_matter_ctl_status_param_create(ESP_RMAKER_DEF_MATTER_CTL_STATUS_NAME));
+        s_matter_devices_param = matter_controller_matter_devices_param_create(ESP_RMAKER_DEF_MATTER_DEVICES_NAME);
+        esp_rmaker_device_add_param(service, s_matter_devices_param);
+        esp_rmaker_device_add_param(service, matter_controller_matter_devices_data_ver_param_create(ESP_RMAKER_DEF_MATTER_DEVICES_DATA_VER_NAME));
     }
     return service;
+}
+
+
+esp_rmaker_param_t *matter_controller_get_matter_devices_param()
+{
+    return s_matter_devices_param;
 }

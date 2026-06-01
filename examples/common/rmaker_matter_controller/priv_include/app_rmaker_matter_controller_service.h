@@ -23,6 +23,10 @@ extern "C" {
 #define ESP_RMAKER_PARAM_MATTER_CTL_CMD "esp.param.matter-ctl-cmd"
 #define ESP_RMAKER_DEF_MATTER_CTL_STATUS_NAME "MTCtlStatus"
 #define ESP_RMAKER_PARAM_MATTER_CTL_STATUS "esp.param.matter-ctl-status"
+#define ESP_RMAKER_DEF_MATTER_DEVICES_NAME "MTDevices"
+#define ESP_RMAKER_PARAM_MATTER_DEVICES "esp.param.matter-devices"
+#define ESP_RMAKER_DEF_MATTER_DEVICES_DATA_VER_NAME "MTDeviceDataVer"
+#define ESP_RMAKER_PARAM_MATTER_DEVICES_DATA_VER "esp.param.matter-devices-data-ver"
 
 #define MATTER_CTL_CMD_UPDATE_NOC 1
 #define MATTER_CTL_CMD_UPDATE_DEVICE_LIST 2
@@ -42,6 +46,8 @@ esp_rmaker_device_t *matter_controller_setup_service_create(const char *serv_nam
                                                             esp_rmaker_device_bulk_write_cb_t bulk_write_cb,
                                                             esp_rmaker_device_bulk_read_cb_t bulk_read_cb,
                                                             void *priv_data);
+
+esp_rmaker_param_t *matter_controller_get_matter_devices_param();
 
 #ifdef __cplusplus
 }

@@ -31,6 +31,7 @@ typedef struct matter_device {
     bool reachable;
     bool is_rainmaker_device;
     bool is_metadata_fetched;
+    bool metadata_has_command_lists;
     uint8_t endpoint_count;
     endpoint_entry_t endpoints[ESP_MATTER_DEVICE_MAX_ENDPOINT];
     struct matter_device *next;

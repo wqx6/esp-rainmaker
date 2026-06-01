@@ -13,6 +13,7 @@
 #include <mbedtls/pem.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "app_rmaker_matter_controller.h"
 #include "app_rmaker_matter_controller_api.h"
@@ -631,6 +632,42 @@ static esp_err_t fetch_matter_node_list(const char *group_id, matter_device_t **
     return ESP_OK;
 }
 
+static bool check_metadata_has_command_lists(cJSON *endpoints_data)
+{
+    if (!endpoints_data || !cJSON_IsObject(endpoints_data)) {
+        return false;
+    }
+
+    for (cJSON *ep = endpoints_data->child; ep; ep = ep->next) {
+        if (!cJSON_IsObject(ep)) {
+            continue;
+        }
+
+        cJSON *clusters = cJSON_GetObjectItem(ep, "clusters");
+        if (!clusters || !cJSON_IsObject(clusters)) {
+            continue;
+        }
+
+        cJSON *servers = cJSON_GetObjectItem(clusters, "servers");
+        if (!servers || !cJSON_IsObject(servers)) {
+            continue;
+        }
+
+        for (cJSON *cluster = servers->child; cluster; cluster = cluster->next) {
+            if (!cJSON_IsObject(cluster)) {
+                continue;
+            }
+
+            cJSON *commands = cJSON_GetObjectItem(cluster, "commands");
+            if (commands && (cJSON_IsArray(commands) || cJSON_IsObject(commands))) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 static esp_err_t fetch_matter_node_metadata(matter_device_t *device)
 {
     if (!device) {
@@ -696,6 +733,7 @@ static esp_err_t fetch_matter_node_metadata(matter_device_t *device)
                     device->endpoints[0].device_type_id = (uint32_t)device_type->valueint;
                     device->endpoints[0].endpoint_id = 1; /* Default endpoint ID */
                     cJSON *endpoints_data = cJSON_GetObjectItem(matter, "endpoints");
+                    device->metadata_has_command_lists = check_metadata_has_command_lists(endpoints_data);
                     if (endpoints_data && cJSON_IsArray(endpoints_data)) {
                         int ep_count = cJSON_GetArraySize(endpoints_data);
                         int ep_id = 1;
@@ -758,4 +796,36 @@ esp_err_t app_rmaker_api_get_matter_device_list(const char *group_id, matter_dev
         }
     }
     return ESP_OK;
+}
+
+esp_err_t app_rmaker_api_update_rainmaker_node_metadata(const char *rainmaker_node_id, const char *body_json)
+{
+    if (!rainmaker_node_id || strlen(rainmaker_node_id) == 0 || !body_json || strlen(body_json) == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char parameters[RAINMAKER_URL_LEN] = {0};
+    snprintf(parameters, sizeof(parameters), "node_id=%s",rainmaker_node_id);
+
+    app_rmaker_user_api_request_config_t request_config = {
+#ifdef MATTER_CONTROLLER_REUSE_SESSION
+        .reuse_session = true,
+#else
+        .reuse_session = false,
+#endif
+        .api_type = APP_RMAKER_USER_API_TYPE_PUT,
+        .api_name = "user/nodes",
+        .api_version = NULL,
+        .api_query_params = parameters,
+        .api_payload = body_json,
+    };
+
+    char *response_data = NULL;
+    int status_code = 0;
+    esp_err_t err = app_rmaker_user_api_generic(&request_config, &status_code, &response_data);
+    if (err != ESP_OK) {
+        free(response_data);
+        return err;
+    }
+    return status_code == 200 ? ESP_OK : ESP_FAIL;
 }

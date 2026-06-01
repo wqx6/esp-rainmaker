@@ -109,6 +109,19 @@ esp_err_t app_rmaker_api_issue_noc(const uint8_t *csr_der, size_t csr_der_len, c
  */
 esp_err_t app_rmaker_api_get_matter_device_list(const char *group_id, matter_device_t **device_list);
 
+/**
+ * @brief Update RainMaker node metadata (PUT user/nodes). Body must be a full JSON object, e.g.
+ * `{"metadata":{"Matter":{...}}}`.
+ *
+ * @param[in] endpoint_url Base API URL
+ * @param[in] access_token Authorization bearer value
+ * @param[in] rainmaker_node_id Target node id
+ * @param[in] body_json JSON payload (null-terminated)
+ *
+ * @return ESP_OK when HTTP 200 and success status in response body (if present)
+ */
+esp_err_t app_rmaker_api_update_rainmaker_node_metadata(const char *rainmaker_node_id, const char *body_json);
+
 #ifdef __cplusplus
 }
 #endif
