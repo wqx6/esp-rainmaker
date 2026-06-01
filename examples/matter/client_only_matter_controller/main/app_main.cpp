@@ -25,6 +25,7 @@
 #include <esp_rmaker_standard_devices.h>
 #include <esp_rmaker_schedule.h>
 #include <esp_rmaker_scenes.h>
+#include <esp_rmaker_thread_br.h>
 #include <esp_rmaker_console.h>
 #include <esp_rmaker_ota.h>
 #include <esp_rmaker_user_mapping.h>
@@ -33,6 +34,7 @@
 
 #include <app_insights.h>
 #include <app_matter_device_manager.h>
+#include <app_thread_config.h>
 #include <matter_attr_report.h>
 
 #include <matter_controller_std.h>
@@ -256,7 +258,7 @@ extern "C" void app_main()
      * You can optionally use the helper API esp_rmaker_switch_device_create() to
      * avoid writing code for adding the name and power parameters.
      */
-    matter_controller_device = esp_rmaker_device_create("MatterController", ESP_RMAKER_DEVICE_MATTER_CONTROLLER, NULL);
+    matter_controller_device = esp_rmaker_device_create("MatterController", ESP_RMAKER_DEVICE_THREAD_BR, NULL);
 
     /* Add the write callback for the device. We aren't registering any read callback yet as
      * it is for future use.
@@ -272,6 +274,13 @@ extern "C" void app_main()
 
     /* Add this switch device to the node */
     esp_rmaker_node_add_device(node, matter_controller_device);
+
+    esp_openthread_platform_config_t thread_cfg = {
+        .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
+        .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
+        .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG()
+    };
+    esp_rmaker_thread_br_enable(&thread_cfg);
 
     /* Enable OTA */
     esp_rmaker_ota_enable_default();

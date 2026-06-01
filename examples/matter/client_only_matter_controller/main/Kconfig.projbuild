@@ -1,0 +1,19 @@
+menu "Thread BR Configuration"
+    depends on OPENTHREAD_BORDER_ROUTER
+    config PIN_TO_RCP_RESET
+        int "Pin to RCP reset"
+        default "7"
+
+    config PIN_TO_RCP_BOOT
+        int "Pin to RCP boot"
+        default "8"
+
+    config PIN_TO_RCP_TX
+        int "Pin to RCP TX"
+        default "17"
+
+    config PIN_TO_RCP_RX
+        int "Pin to RCP RX"
+        default "18"
+
+endmenu
